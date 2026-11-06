@@ -2,6 +2,7 @@
 
 import csv
 import io
+import os
 
 import pytest
 
@@ -176,3 +177,40 @@ def test_write_csv_failure_creates_no_file(tmp_path):
     with pytest.raises(RuntimeError):
         write_batch_csv(failing_rows(), tmp_path / "batch_record.csv")
     assert list(tmp_path.iterdir()) == []
+
+
+# --- Review 2 fix: temp cleanup, fsync, symlinks ----------------------------
+
+
+def test_write_csv_failed_replace_leaves_no_temp_file(tmp_path):
+    """If the final rename fails (destination is a folder), the temp file is removed."""
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with pytest.raises(OSError):
+        write_batch_csv([batch_row()], dest)
+    assert list(tmp_path.iterdir()) == [dest]
+
+
+def test_write_csv_fsyncs_before_replace(tmp_path, monkeypatch):
+    """Data is flushed to disk before the rename, so a crash can't leave it empty."""
+    calls = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(
+        os, "fsync", lambda fd: (calls.append("fsync"), real_fsync(fd))[1]
+    )
+    monkeypatch.setattr(
+        os, "replace", lambda a, b: (calls.append("replace"), real_replace(a, b))[1]
+    )
+    write_batch_csv([batch_row()], tmp_path / "batch_record.csv")
+    assert calls == ["fsync", "replace"]
+
+
+def test_write_csv_follows_symlink(tmp_path):
+    """Writing through a symlink updates its target and keeps the link."""
+    target = tmp_path / "target.csv"
+    target.write_text("old", encoding="utf-8")
+    link = tmp_path / "batch_record.csv"
+    link.symlink_to(target)
+    write_batch_csv([batch_row()], link)
+    assert link.is_symlink()
+    assert raw_text(target).split("\r\n")[0] == CLIENT_BATCH_HEADER

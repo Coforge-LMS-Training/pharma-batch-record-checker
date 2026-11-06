@@ -6,6 +6,11 @@ even when there are no rows. Cells are quoted only when needed (for example,
 comments that contain commas, quotes or newlines). Reading CSVs is the
 parser's job and lives elsewhere.
 
+Values are written exactly as given and are never escaped. A comment that
+starts with "=", "+", "-" or "@" stays as written, because comments are plain
+data. If you open these files in a spreadsheet, import the columns as text so
+nothing is evaluated as a formula.
+
 Writing to a path is atomic: rows go to a temporary file in the same folder,
 which replaces the destination only once every row is written. If a row fails,
 any existing file is left untouched and no partial CSV is left behind.
@@ -67,28 +72,37 @@ def _write_path_atomically(
 ) -> None:
     """Write to a temp file beside path, then rename it over path in one step.
 
-    The new file keeps the existing file's permissions, or gets 0o644 if the
-    file is new (a bare temp file would otherwise be owner-only, 0o600).
+    - A symlinked path is resolved first, so its target is updated and the
+      link itself is kept.
+    - The data is fsynced before the rename, so a crash can't leave an empty
+      or truncated file in place of the old one.
+    - On any failure (a row, chmod or the rename), the temp file is removed.
+    - The new file keeps the existing file's permissions, or gets 0o644 if
+      the file is new (a bare temp file would otherwise be owner-only, 0o600).
     """
+    path = path.resolve()
     mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
-    with tempfile.NamedTemporaryFile(
-        "w",
-        newline="",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-        try:
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            newline="",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
             _write_rows(header, rows, tmp)
-        except BaseException:
-            tmp.close()
-            tmp_path.unlink()
-            raise
-    os.chmod(tmp_path, mode)
-    os.replace(tmp_path, path)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _write_rows(
