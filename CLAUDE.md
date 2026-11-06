@@ -13,8 +13,9 @@ Batch Record Review Checker (Pharma): checks synthetic batch records against the
 - Batch: `batch_id,master_record_id,master_version,step_id,reading,unit,performed_by,performed_at,verified_by,verified_at,comment`
 - Join key is `(master_record_id, master_version, step_id)`.
 - Limits are inclusive, and a blank limit means no limit. `critical` is Y/N.
-- Timestamps have no timezone. Keep raw values as written (a blank reading is not 0).
-- The source of truth for this contract is `schema.py` (`MasterRow`, `BatchRow`, headers, `TIMESTAMP_FORMAT` = `YYYY-MM-DDTHH:MM:SS`) together with `csv_io.py` (`write_master_csv`, `write_batch_csv`). Use these instead of writing CSVs by hand.
+- Timestamps are `YYYY-MM-DDTHH:MM` (minute precision, no timezone). Keep raw values as written (a blank reading is not 0).
+- Files are UTF-8 with no BOM and CRLF line endings, matching the client samples in `sample/` (gitignored, synthetic).
+- The source of truth for this contract is `schema.py` (`MasterRow`, `BatchRow`, headers, `TIMESTAMP_FORMAT`; field order is checked against the headers at import by `_check_header`) together with `csv_io.py` (`write_master_csv`, `write_batch_csv`). Use these instead of writing CSVs by hand. Non-canonical input is rejected, not normalized: numbers must be plain ASCII notation, and text can't be whitespace-only.
 
 ## Rules (`rule_version` 1.0.0)
 - `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`
