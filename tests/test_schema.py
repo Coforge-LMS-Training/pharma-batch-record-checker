@@ -1,6 +1,6 @@
 """Tests for the master/batch CSV row models (PHA-33). All data is synthetic."""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -177,9 +177,9 @@ def batch_data(**overrides):
         "reading": "12.5",
         "unit": "min",
         "performed_by": "OP-07",
-        "performed_at": "2026-01-15T08:30:00",
+        "performed_at": "2026-01-15T08:30",
         "verified_by": "QA-02",
-        "verified_at": "2026-01-15T08:45:00",
+        "verified_at": "2026-01-15T08:45",
         "comment": "",
     }
     data.update(overrides)
@@ -221,7 +221,7 @@ def test_batch_blank_optional_fields_validate():
         pytest.param({"reading": "99"}, id="out_of_range"),
         pytest.param({"performed_by": "", "performed_at": ""}, id="missing_performer"),
         pytest.param(
-            {"verified_at": "2026-01-15T08:00:00"}, id="verifier_before_performer"
+            {"verified_at": "2026-01-15T08:00"}, id="verifier_before_performer"
         ),
         pytest.param({"unit": "MIN"}, id="unit_mismatch"),
     ],
@@ -243,7 +243,7 @@ def test_batch_key_field_blank_rejected(field):
 def test_batch_timezone_aware_timestamp_rejected():
     """Timestamps have no timezone; an offset is rejected."""
     with pytest.raises(ValidationError):
-        BatchRow.model_validate(batch_data(performed_at="2026-01-15T08:30:00+05:30"))
+        BatchRow.model_validate(batch_data(performed_at="2026-01-15T08:30+05:30"))
 
 
 def test_batch_reading_must_be_numeric_when_present():
@@ -293,12 +293,12 @@ def test_decimal_kept_as_written():
 
 
 def test_batch_to_csv_row_timestamp_format():
-    """Timestamps serialize as ISO 8601, no timezone, whole seconds."""
+    """Timestamps serialize as ISO 8601 to the minute, with no timezone."""
     out = BatchRow.model_validate(
         batch_data(performed_at=datetime(2026, 1, 15, 8, 30))
     ).to_csv_row()
-    assert out["performed_at"] == "2026-01-15T08:30:00"
-    assert out["verified_at"] == "2026-01-15T08:45:00"
+    assert out["performed_at"] == "2026-01-15T08:30"
+    assert out["verified_at"] == "2026-01-15T08:45"
 
 
 def test_batch_to_csv_row_blank_fields_are_empty_strings():
@@ -316,15 +316,16 @@ def test_batch_to_csv_row_blank_fields_are_empty_strings():
 @pytest.mark.parametrize(
     "raw",
     [
+        "2026-01-15T08:30:00",
         "2026-01-15T08:30:00.999",
         "2026-01-15",
         "2026-01-15 08:30:00",
         "2026-1-15T8:30:00",
-        " 2026-01-15T08:30:00",
+        " 2026-01-15T08:30",
     ],
 )
 def test_batch_timestamp_rejects_non_canonical_strings(raw):
-    """Only YYYY-MM-DDTHH:MM:SS is accepted, so nothing is rewritten on output."""
+    """Only YYYY-MM-DDTHH:MM is accepted, so nothing is rewritten on output."""
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(performed_at=raw))
 
@@ -337,9 +338,23 @@ def test_batch_timestamp_rejects_datetime_with_microseconds():
         )
 
 
+def test_batch_timestamp_rejects_datetime_with_seconds():
+    """Timestamps are minute precision; seconds would be lost on output."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(
+            batch_data(performed_at=datetime(2026, 1, 15, 8, 30, 5))
+        )
+
+
+def test_batch_timestamp_rejects_date_object():
+    """A bare date must not become a made-up midnight timestamp."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(performed_at=date(2026, 1, 15)))
+
+
 def test_batch_timestamp_string_round_trips_as_written():
     """A canonical timestamp string is written back unchanged."""
-    raw = "2026-12-31T23:59:59"
+    raw = "2026-12-31T23:59"
     assert (
         BatchRow.model_validate(batch_data(verified_at=raw)).to_csv_row()["verified_at"]
         == raw

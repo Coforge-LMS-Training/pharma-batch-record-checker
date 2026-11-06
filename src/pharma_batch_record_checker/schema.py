@@ -5,7 +5,7 @@ fields are declared in exactly the same order as the headers.
 """
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -57,19 +57,26 @@ def _plain_decimal(value: Any) -> Any:
     return text
 
 
-# Timestamps are written as ISO 8601 with no timezone and whole seconds.
-TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S"
-_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+# Timestamps are written as ISO 8601 to the minute, with no timezone, matching
+# the client samples (e.g. 2026-10-12T07:00).
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M"
+_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
 
 
 def _canonical_timestamp(value: Any) -> Any:
-    """Allow only blank, an exact YYYY-MM-DDTHH:MM:SS string, or a whole-second
-    naive datetime, so a timestamp is written back exactly as it was given."""
+    """Allow only blank, an exact YYYY-MM-DDTHH:MM string, or a naive datetime
+    with zero seconds, so a timestamp is written back exactly as it was given.
+
+    A bare date is rejected rather than turned into an invented midnight time.
+    """
     value = _blank_to_none(value)
-    if isinstance(value, str) and not _TIMESTAMP_RE.fullmatch(value):
-        raise ValueError("timestamp must be YYYY-MM-DDTHH:MM:SS")
-    if isinstance(value, datetime) and value.microsecond:
-        raise ValueError("timestamp must be whole seconds (no microseconds)")
+    non_canonical = (
+        (isinstance(value, str) and not _TIMESTAMP_RE.fullmatch(value))
+        or (isinstance(value, datetime) and (value.second or value.microsecond))
+        or (isinstance(value, date) and not isinstance(value, datetime))
+    )
+    if non_canonical:
+        raise ValueError("timestamp must be YYYY-MM-DDTHH:MM (minute precision)")
     return value
 
 

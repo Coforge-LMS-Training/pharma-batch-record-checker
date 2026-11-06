@@ -65,9 +65,9 @@ def batch_row(**overrides):
         "reading": "12.5",
         "unit": "min",
         "performed_by": "OP-07",
-        "performed_at": "2026-01-15T08:30:00",
+        "performed_at": "2026-01-15T08:30",
         "verified_by": "QA-02",
-        "verified_at": "2026-01-15T08:45:00",
+        "verified_at": "2026-01-15T08:45",
         "comment": "",
     }
     data.update(overrides)
