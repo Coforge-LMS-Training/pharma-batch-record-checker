@@ -120,8 +120,7 @@ class MasterRow(_CsvRow):
     @field_validator("critical", mode="before")
     @classmethod
     def _critical_y_n(cls, value: Any) -> Any:
-        # Pydantic's own bool parsing would also accept "yes", "1", "on", ...
-        # The CSV contract allows only Y or N.
+        """Accept only Y/N (or a bool); Pydantic alone would also take yes/1/on."""
         if isinstance(value, bool):
             return value
         if value == "Y":
@@ -132,6 +131,7 @@ class MasterRow(_CsvRow):
 
     @model_validator(mode="after")
     def _check_limits(self) -> "MasterRow":
+        """Sign-off-only steps have no unit or limits; when both limits exist, min <= max."""
         if self.parameter is None and (
             self.unit is not None
             or self.min_value is not None

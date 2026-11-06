@@ -29,18 +29,22 @@ CLIENT_BATCH_HEADER = (
 
 
 def test_master_header_matches_client_order():
+    """Master header is the client-approved string, column for column."""
     assert ",".join(MASTER_HEADER) == CLIENT_MASTER_HEADER
 
 
 def test_batch_header_matches_client_order():
+    """Batch header is the client-approved string, column for column."""
     assert ",".join(BATCH_HEADER) == CLIENT_BATCH_HEADER
 
 
 def test_master_model_fields_follow_header():
+    """MasterRow declares its fields in master header order."""
     assert tuple(MasterRow.model_fields) == MASTER_HEADER
 
 
 def test_batch_model_fields_follow_header():
+    """BatchRow declares its fields in batch header order."""
     assert tuple(BatchRow.model_fields) == BATCH_HEADER
 
 
@@ -76,6 +80,7 @@ def sign_off_data(**overrides):
 
 
 def test_master_measured_step_validates():
+    """A measured step with both limits parses into typed values."""
     row = MasterRow.model_validate(master_data())
     assert row.min_value == Decimal(10)
     assert row.max_value == Decimal(15)
@@ -83,6 +88,7 @@ def test_master_measured_step_validates():
 
 
 def test_master_sign_off_only_step_validates():
+    """Blank parameter, unit and limits become None for a sign-off step."""
     row = MasterRow.model_validate(sign_off_data())
     assert row.parameter is None
     assert row.unit is None
@@ -91,58 +97,69 @@ def test_master_sign_off_only_step_validates():
 
 
 def test_master_one_sided_limit_validates():
+    """A blank max means unbounded above; only the min is set."""
     row = MasterRow.model_validate(master_data(min_value="5", max_value=""))
     assert row.min_value == Decimal(5)
     assert row.max_value is None
 
 
 def test_master_equal_limits_allowed():
+    """Limits are inclusive, so min == max is valid."""
     row = MasterRow.model_validate(master_data(min_value="7", max_value="7"))
     assert row.min_value == row.max_value
 
 
 def test_master_min_greater_than_max_rejected():
+    """min_value above max_value is an invalid master row."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(min_value="16", max_value="15"))
 
 
 def test_master_sign_off_step_with_unit_rejected():
+    """A sign-off step (blank parameter) must not carry a unit."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(sign_off_data() | {"unit": "min"})
 
 
 def test_master_sign_off_step_with_limit_rejected():
+    """A sign-off step (blank parameter) must not carry a limit."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(sign_off_data() | {"min_value": "1"})
 
 
 @pytest.mark.parametrize(("raw", "expected"), [("Y", True), ("N", False)])
 def test_master_critical_accepts_y_n(raw, expected):
+    """critical parses Y as True and N as False."""
     assert MasterRow.model_validate(master_data(critical=raw)).critical is expected
 
 
 @pytest.mark.parametrize("raw", ["yes", "y", "1", ""])
 def test_master_critical_rejects_other_values(raw):
+    """critical rejects anything other than exactly Y or N."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(critical=raw))
 
 
 def test_master_required_field_blank_rejected():
+    """Required text fields may not be blank."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(product_name=""))
 
 
 def test_master_step_seq_must_be_positive():
+    """step_seq starts at 1."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(step_seq="0"))
 
 
 def test_master_batch_size_must_be_positive():
+    """batch_size must be greater than zero."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(batch_size="0"))
 
 
 def test_master_extra_field_rejected():
+    """Columns outside the contract are rejected."""
     with pytest.raises(ValidationError):
         MasterRow.model_validate(master_data(notes="unexpected"))
 
@@ -182,6 +199,7 @@ BATCH_KEY_FIELDS = ("batch_id", "master_record_id", "master_version", "step_id")
 
 
 def test_batch_clean_row_validates():
+    """A fully signed-off row parses reading, timestamps and a blank comment."""
     row = BatchRow.model_validate(batch_data())
     assert row.reading == Decimal("12.5")
     assert row.performed_at == datetime(2026, 1, 15, 8, 30)
@@ -189,6 +207,7 @@ def test_batch_clean_row_validates():
 
 
 def test_batch_blank_optional_fields_validate():
+    """Every non-key field may be blank and becomes None."""
     row = BatchRow.model_validate(
         batch_data(**dict.fromkeys(BATCH_OPTIONAL_FIELDS, ""))
     )
@@ -208,7 +227,7 @@ def test_batch_blank_optional_fields_validate():
     ],
 )
 def test_batch_defect_rows_validate(overrides):
-    # Planted defects must be representable; finding them is the rule engine's job.
+    """Planted defects stay representable; detecting them is the rule engine's job."""
     row = BatchRow.model_validate(batch_data(**overrides))
     if "unit" in overrides:
         assert row.unit == "MIN"  # kept exactly as written, never normalized
@@ -216,16 +235,19 @@ def test_batch_defect_rows_validate(overrides):
 
 @pytest.mark.parametrize("field", BATCH_KEY_FIELDS)
 def test_batch_key_field_blank_rejected(field):
+    """Each part of the join key is required."""
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(**{field: ""}))
 
 
 def test_batch_timezone_aware_timestamp_rejected():
+    """Timestamps have no timezone; an offset is rejected."""
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(performed_at="2026-01-15T08:30:00+05:30"))
 
 
 def test_batch_reading_must_be_numeric_when_present():
+    """A non-blank reading must be a number."""
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(reading="abc"))
 
@@ -234,10 +256,12 @@ def test_batch_reading_must_be_numeric_when_present():
 
 
 def test_master_to_csv_row_keys_in_header_order():
+    """Serialized master row keys follow the header order."""
     assert tuple(MasterRow.model_validate(master_data()).to_csv_row()) == MASTER_HEADER
 
 
 def test_master_to_csv_row_blank_fields_are_empty_strings():
+    """None fields serialize as empty cells, never 0."""
     out = MasterRow.model_validate(sign_off_data()).to_csv_row()
     assert [out[f] for f in ("parameter", "unit", "min_value", "max_value")] == [
         "",
@@ -249,6 +273,7 @@ def test_master_to_csv_row_blank_fields_are_empty_strings():
 
 @pytest.mark.parametrize("flag", ["Y", "N"])
 def test_master_to_csv_row_critical_is_y_or_n(flag):
+    """critical serializes back to exactly Y or N."""
     assert (
         MasterRow.model_validate(master_data(critical=flag)).to_csv_row()["critical"]
         == flag
@@ -256,6 +281,7 @@ def test_master_to_csv_row_critical_is_y_or_n(flag):
 
 
 def test_decimal_kept_as_written():
+    """Decimals keep their written form, including trailing zeros."""
     out = MasterRow.model_validate(
         master_data(min_value="7.50", max_value="100", batch_size="250000")
     ).to_csv_row()
@@ -267,6 +293,7 @@ def test_decimal_kept_as_written():
 
 
 def test_batch_to_csv_row_timestamp_format():
+    """Timestamps serialize as ISO 8601, no timezone, whole seconds."""
     out = BatchRow.model_validate(
         batch_data(performed_at=datetime(2026, 1, 15, 8, 30, 0, 123456))
     ).to_csv_row()
@@ -276,6 +303,7 @@ def test_batch_to_csv_row_timestamp_format():
 
 
 def test_batch_to_csv_row_blank_fields_are_empty_strings():
+    """Blank batch fields serialize as empty cells, in header order."""
     out = BatchRow.model_validate(
         batch_data(**dict.fromkeys(BATCH_OPTIONAL_FIELDS, ""))
     ).to_csv_row()

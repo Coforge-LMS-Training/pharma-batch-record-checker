@@ -8,5 +8,6 @@ from pharma_batch_record_checker import main
 
 
 def test_main_prints_greeting(capsys):
+    """The entry point runs and prints the package name."""
     main()
     assert "pharma-batch-record-checker" in capsys.readouterr().out
