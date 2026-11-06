@@ -7,7 +7,9 @@ authors = [
     { name = "Sarthak-Coforge-03", email = "sarthak.kakkar@coforge.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ruff>=0.17.4",
+]
 
 [project.scripts]
 pharma-batch-record-checker = "pharma_batch_record_checker:main"
