@@ -228,3 +228,56 @@ def test_batch_timezone_aware_timestamp_rejected():
 def test_batch_reading_must_be_numeric_when_present():
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(reading="abc"))
+
+
+# --- Slice 4: row serialization ---------------------------------------------
+
+
+def test_master_to_csv_row_keys_in_header_order():
+    assert tuple(MasterRow.model_validate(master_data()).to_csv_row()) == MASTER_HEADER
+
+
+def test_master_to_csv_row_blank_fields_are_empty_strings():
+    out = MasterRow.model_validate(sign_off_data()).to_csv_row()
+    assert [out[f] for f in ("parameter", "unit", "min_value", "max_value")] == [
+        "",
+        "",
+        "",
+        "",
+    ]
+
+
+@pytest.mark.parametrize("flag", ["Y", "N"])
+def test_master_to_csv_row_critical_is_y_or_n(flag):
+    assert (
+        MasterRow.model_validate(master_data(critical=flag)).to_csv_row()["critical"]
+        == flag
+    )
+
+
+def test_decimal_kept_as_written():
+    out = MasterRow.model_validate(
+        master_data(min_value="7.50", max_value="100", batch_size="250000")
+    ).to_csv_row()
+    assert (out["min_value"], out["max_value"], out["batch_size"]) == (
+        "7.50",
+        "100",
+        "250000",
+    )
+
+
+def test_batch_to_csv_row_timestamp_format():
+    out = BatchRow.model_validate(
+        batch_data(performed_at=datetime(2026, 1, 15, 8, 30, 0, 123456))
+    ).to_csv_row()
+    # ISO 8601, no timezone, whole seconds.
+    assert out["performed_at"] == "2026-01-15T08:30:00"
+    assert out["verified_at"] == "2026-01-15T08:45:00"
+
+
+def test_batch_to_csv_row_blank_fields_are_empty_strings():
+    out = BatchRow.model_validate(
+        batch_data(**dict.fromkeys(BATCH_OPTIONAL_FIELDS, ""))
+    ).to_csv_row()
+    assert tuple(out) == BATCH_HEADER
+    assert all(out[f] == "" for f in BATCH_OPTIONAL_FIELDS)

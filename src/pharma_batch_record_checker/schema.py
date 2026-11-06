@@ -4,6 +4,7 @@ The column names and their order are client-approved and mandatory. The model
 fields are declared in exactly the same order as the headers.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -25,6 +26,35 @@ RequiredStr = Annotated[str, StringConstraints(min_length=1)]
 def _blank_to_none(value: Any) -> Any:
     """Treat an empty CSV cell as "no value". A blank is never 0."""
     return None if value == "" else value
+
+
+# Timestamps are written as ISO 8601 with no timezone and whole seconds.
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S"
+
+
+def _format_cell(value: Any) -> str:
+    """Turn one field value into its CSV cell text."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):  # check before int: bool is a subclass of int
+        return "Y" if value else "N"
+    if isinstance(value, Decimal):
+        return format(value, "f")  # plain notation, trailing zeros kept ("7.50")
+    if isinstance(value, datetime):
+        return value.strftime(TIMESTAMP_FORMAT)
+    return str(value)
+
+
+class _CsvRow(BaseModel):
+    """Base for row models: frozen, no extra columns, and CSV serialization."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    def to_csv_row(self) -> dict[str, str]:
+        """Return this row as {column: cell text}, in header order."""
+        return {
+            name: _format_cell(getattr(self, name)) for name in type(self).model_fields
+        }
 
 
 MASTER_HEADER: tuple[str, ...] = (
@@ -60,14 +90,12 @@ BATCH_HEADER: tuple[str, ...] = (
 )
 
 
-class MasterRow(BaseModel):
+class MasterRow(_CsvRow):
     """One step of a master record (master_record.csv).
 
     Limits are inclusive, and a blank limit means no limit on that side.
     A sign-off-only step has a blank parameter, unit, min_value and max_value.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     master_record_id: RequiredStr
     master_version: RequiredStr
@@ -122,7 +150,7 @@ class MasterRow(BaseModel):
         return self
 
 
-class BatchRow(BaseModel):
+class BatchRow(_CsvRow):
     """One executed step of a batch (batch_record.csv).
 
     Only the join key is required. Everything else may be blank, and there are
@@ -131,8 +159,6 @@ class BatchRow(BaseModel):
     out-of-range reading). Detecting them is the rule engine's job.
     Timestamps have no timezone; timezone-aware values are rejected.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     batch_id: RequiredStr
     master_record_id: RequiredStr
