@@ -14,6 +14,7 @@ Batch Record Review Checker (Pharma): checks synthetic batch records against the
 - Join key is `(master_record_id, master_version, step_id)`.
 - Limits are inclusive, and a blank limit means no limit. `critical` is Y/N.
 - Timestamps have no timezone. Keep raw values as written (a blank reading is not 0).
+- The source of truth for this contract is `schema.py` (`MasterRow`, `BatchRow`, headers, `TIMESTAMP_FORMAT` = `YYYY-MM-DDTHH:MM:SS`) together with `csv_io.py` (`write_master_csv`, `write_batch_csv`). Use these instead of writing CSVs by hand.
 
 ## Rules (`rule_version` 1.0.0)
 - `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`
