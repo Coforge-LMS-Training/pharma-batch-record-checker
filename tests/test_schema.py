@@ -422,3 +422,25 @@ def test_required_value_not_stripped():
     """Valid values are never stripped or collapsed."""
     row = MasterRow.model_validate(master_data(product_name="Synthetamol  Tablets"))
     assert row.product_name == "Synthetamol  Tablets"
+
+
+# --- Review fix D: master unit and strict step_seq --------------------------
+
+
+def test_master_measured_step_without_unit_rejected():
+    """A measured step needs a unit to compare batch readings against."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(unit=""))
+
+
+@pytest.mark.parametrize("raw", ["1.0", True, 1.0, "01", " 1"])
+def test_master_step_seq_rejects_non_canonical(raw):
+    """step_seq must be a plain positive integer; nothing is coerced."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(step_seq=raw))
+
+
+@pytest.mark.parametrize("raw", [3, "3"])
+def test_master_step_seq_accepts_int_and_digit_string(raw):
+    """An int or its digit string both give the same step_seq."""
+    assert MasterRow.model_validate(master_data(step_seq=raw)).step_seq == 3

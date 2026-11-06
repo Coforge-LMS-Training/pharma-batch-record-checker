@@ -34,6 +34,7 @@ def _blank_to_none(value: Any) -> Any:
 
 
 _PLAIN_DECIMAL_RE = re.compile(r"-?\d+(\.\d+)?")
+_STEP_SEQ_RE = re.compile(r"[1-9]\d*")
 
 
 def _plain_decimal(value: Any) -> Any:
@@ -135,6 +136,8 @@ class MasterRow(_CsvRow):
 
     Limits are inclusive, and a blank limit means no limit on that side.
     A sign-off-only step has a blank parameter, unit, min_value and max_value.
+    A measured step (parameter set) must have a unit; unitless measures use an
+    explicit unit string such as "pH".
     """
 
     master_record_id: RequiredStr
@@ -170,9 +173,23 @@ class MasterRow(_CsvRow):
             return False
         raise ValueError("critical must be 'Y' or 'N'")
 
+    @field_validator("step_seq", mode="before")
+    @classmethod
+    def _plain_step_seq(cls, value: Any) -> Any:
+        """Accept an int or its digit string ("3"); reject bools, floats,
+        "1.0", leading zeros and whitespace instead of coercing them."""
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and _STEP_SEQ_RE.fullmatch(value):
+            return value
+        raise ValueError("step_seq must be a positive integer, e.g. 3")
+
     @model_validator(mode="after")
     def _check_limits(self) -> "MasterRow":
-        """Sign-off-only steps have no unit or limits; when both limits exist, min <= max."""
+        """Measured steps need a unit; sign-off-only steps have no unit or
+        limits; when both limits exist, min <= max."""
+        if self.parameter is not None and self.unit is None:
+            raise ValueError("a measured step (parameter set) must have a unit")
         if self.parameter is None and (
             self.unit is not None
             or self.min_value is not None
