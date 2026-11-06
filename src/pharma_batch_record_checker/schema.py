@@ -4,6 +4,7 @@ The column names and their order are client-approved and mandatory. The model
 fields are declared in exactly the same order as the headers.
 """
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -30,6 +31,18 @@ def _blank_to_none(value: Any) -> Any:
 
 # Timestamps are written as ISO 8601 with no timezone and whole seconds.
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S"
+_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+
+def _canonical_timestamp(value: Any) -> Any:
+    """Allow only blank, an exact YYYY-MM-DDTHH:MM:SS string, or a whole-second
+    naive datetime, so a timestamp is written back exactly as it was given."""
+    value = _blank_to_none(value)
+    if isinstance(value, str) and not _TIMESTAMP_RE.fullmatch(value):
+        raise ValueError("timestamp must be YYYY-MM-DDTHH:MM:SS")
+    if isinstance(value, datetime) and value.microsecond:
+        raise ValueError("timestamp must be whole seconds (no microseconds)")
+    return value
 
 
 def _format_cell(value: Any) -> str:
@@ -176,9 +189,10 @@ class BatchRow(_CsvRow):
         "reading",
         "unit",
         "performed_by",
-        "performed_at",
         "verified_by",
-        "verified_at",
         "comment",
         mode="before",
     )(_blank_to_none)
+    _timestamps = field_validator("performed_at", "verified_at", mode="before")(
+        _canonical_timestamp
+    )

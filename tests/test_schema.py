@@ -295,9 +295,8 @@ def test_decimal_kept_as_written():
 def test_batch_to_csv_row_timestamp_format():
     """Timestamps serialize as ISO 8601, no timezone, whole seconds."""
     out = BatchRow.model_validate(
-        batch_data(performed_at=datetime(2026, 1, 15, 8, 30, 0, 123456))
+        batch_data(performed_at=datetime(2026, 1, 15, 8, 30))
     ).to_csv_row()
-    # ISO 8601, no timezone, whole seconds.
     assert out["performed_at"] == "2026-01-15T08:30:00"
     assert out["verified_at"] == "2026-01-15T08:45:00"
 
@@ -309,3 +308,39 @@ def test_batch_to_csv_row_blank_fields_are_empty_strings():
     ).to_csv_row()
     assert tuple(out) == BATCH_HEADER
     assert all(out[f] == "" for f in BATCH_OPTIONAL_FIELDS)
+
+
+# --- Review fix A: strict timestamps ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2026-01-15T08:30:00.999",
+        "2026-01-15",
+        "2026-01-15 08:30:00",
+        "2026-1-15T8:30:00",
+        " 2026-01-15T08:30:00",
+    ],
+)
+def test_batch_timestamp_rejects_non_canonical_strings(raw):
+    """Only YYYY-MM-DDTHH:MM:SS is accepted, so nothing is rewritten on output."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(performed_at=raw))
+
+
+def test_batch_timestamp_rejects_datetime_with_microseconds():
+    """A datetime with microseconds would be truncated on output, so it is rejected."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(
+            batch_data(performed_at=datetime(2026, 1, 15, 8, 30, 0, 123456))
+        )
+
+
+def test_batch_timestamp_string_round_trips_as_written():
+    """A canonical timestamp string is written back unchanged."""
+    raw = "2026-12-31T23:59:59"
+    assert (
+        BatchRow.model_validate(batch_data(verified_at=raw)).to_csv_row()["verified_at"]
+        == raw
+    )
