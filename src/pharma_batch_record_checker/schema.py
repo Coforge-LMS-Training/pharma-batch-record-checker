@@ -4,7 +4,6 @@ The column names and their order are client-approved and mandatory. The model
 fields are declared in exactly the same order as the headers.
 """
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -12,6 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    NaiveDatetime,
     StringConstraints,
     field_validator,
     model_validator,
@@ -123,16 +123,36 @@ class MasterRow(BaseModel):
 
 
 class BatchRow(BaseModel):
-    """One executed step of a batch (batch_record.csv)."""
+    """One executed step of a batch (batch_record.csv).
 
-    batch_id: str
-    master_record_id: str
-    master_version: str
-    step_id: str
+    Only the join key is required. Everything else may be blank, and there are
+    no cross-field checks: the generator must be able to plant defects
+    (missing reading or performer, verifier before performer, unit mismatch,
+    out-of-range reading). Detecting them is the rule engine's job.
+    Timestamps have no timezone; timezone-aware values are rejected.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    batch_id: RequiredStr
+    master_record_id: RequiredStr
+    master_version: RequiredStr
+    step_id: RequiredStr
     reading: Decimal | None
     unit: str | None
     performed_by: str | None
-    performed_at: datetime | None
+    performed_at: NaiveDatetime | None
     verified_by: str | None
-    verified_at: datetime | None
+    verified_at: NaiveDatetime | None
     comment: str | None
+
+    _blanks = field_validator(
+        "reading",
+        "unit",
+        "performed_by",
+        "performed_at",
+        "verified_by",
+        "verified_at",
+        "comment",
+        mode="before",
+    )(_blank_to_none)
