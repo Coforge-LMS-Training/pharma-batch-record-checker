@@ -19,9 +19,13 @@ from pydantic import (
     model_validator,
 )
 
-# Required text: must be non-empty, but is otherwise kept exactly as written
-# (no stripping or case changes; units are compared as exact strings).
-RequiredStr = Annotated[str, StringConstraints(min_length=1)]
+# Text that must contain at least one non-whitespace character, but is
+# otherwise kept exactly as written (no stripping or case changes; units are
+# compared as exact strings). Optional text fields use `Text | None`: an empty
+# cell becomes None, while a whitespace-only cell is rejected so it can't pass
+# for a real value (or hide a missing one).
+Text = Annotated[str, StringConstraints(pattern=r"\S")]
+RequiredStr = Text
 
 
 def _blank_to_none(value: Any) -> Any:
@@ -143,8 +147,8 @@ class MasterRow(_CsvRow):
     unit_procedure: RequiredStr
     operation: RequiredStr
     phase: RequiredStr
-    parameter: str | None
-    unit: str | None
+    parameter: Text | None
+    unit: Text | None
     min_value: Decimal | None
     max_value: Decimal | None
     critical: bool
@@ -202,10 +206,10 @@ class BatchRow(_CsvRow):
     master_version: RequiredStr
     step_id: RequiredStr
     reading: Decimal | None
-    unit: str | None
-    performed_by: str | None
+    unit: Text | None
+    performed_by: Text | None
     performed_at: NaiveDatetime | None
-    verified_by: str | None
+    verified_by: Text | None
     verified_at: NaiveDatetime | None
     comment: str | None
 

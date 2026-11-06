@@ -381,3 +381,44 @@ def test_negative_reading_kept_as_written():
     """Negative readings (e.g. a freezer temperature) are allowed and kept."""
     row = BatchRow.model_validate(batch_data(reading="-20.5"))
     assert row.to_csv_row()["reading"] == "-20.5"
+
+
+# --- Review fix C: whitespace-only values -----------------------------------
+
+
+@pytest.mark.parametrize("field", ["product_name", "step_id"])
+def test_master_required_field_whitespace_only_rejected(field):
+    """A whitespace-only value is not a real value for a required field."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(**{field: "   "}))
+
+
+@pytest.mark.parametrize("field", BATCH_KEY_FIELDS)
+def test_batch_key_field_whitespace_only_rejected(field):
+    """A whitespace-only join key would silently match nothing, so it is rejected."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(**{field: " "}))
+
+
+def test_master_parameter_whitespace_only_rejected():
+    """A whitespace-only parameter must not pass as a measured step."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(parameter=" "))
+
+
+@pytest.mark.parametrize("field", ["unit", "performed_by", "verified_by"])
+def test_batch_optional_text_whitespace_only_rejected(field):
+    """Whitespace-only must not hide a missing value; blank is written as ''."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(**{field: "  "}))
+
+
+def test_batch_comment_whitespace_kept_as_written():
+    """Comments are free text and are kept exactly, whitespace included."""
+    assert BatchRow.model_validate(batch_data(comment="  ")).comment == "  "
+
+
+def test_required_value_not_stripped():
+    """Valid values are never stripped or collapsed."""
+    row = MasterRow.model_validate(master_data(product_name="Synthetamol  Tablets"))
+    assert row.product_name == "Synthetamol  Tablets"
