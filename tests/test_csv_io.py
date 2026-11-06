@@ -3,6 +3,8 @@
 import csv
 import io
 
+import pytest
+
 from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 
@@ -127,3 +129,36 @@ def test_write_csv_accepts_open_file(tmp_path):
     buffer = io.StringIO()
     write_batch_csv([batch_row()], buffer)
     assert buffer.getvalue() == path.read_text(encoding="utf-8")
+
+
+# --- Review fix E: path types and atomic writes -----------------------------
+
+
+def failing_rows():
+    """Yield one valid batch row, then fail, like a generator crashing mid-run."""
+    yield batch_row()
+    raise RuntimeError("generator failed")
+
+
+def test_write_csv_accepts_str_path(tmp_path):
+    """A plain string path is written like a Path, not treated as a stream."""
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv([batch_row()], str(path))
+    assert path.read_text(encoding="utf-8").split("\n")[0] == CLIENT_BATCH_HEADER
+
+
+def test_write_csv_failure_keeps_existing_file(tmp_path):
+    """If rows fail partway, the existing file is untouched and no temp file remains."""
+    path = tmp_path / "batch_record.csv"
+    path.write_text("old", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        write_batch_csv(failing_rows(), path)
+    assert path.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_csv_failure_creates_no_file(tmp_path):
+    """If rows fail partway and no file existed, nothing is left behind."""
+    with pytest.raises(RuntimeError):
+        write_batch_csv(failing_rows(), tmp_path / "batch_record.csv")
+    assert list(tmp_path.iterdir()) == []
