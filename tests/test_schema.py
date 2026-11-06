@@ -344,3 +344,40 @@ def test_batch_timestamp_string_round_trips_as_written():
         BatchRow.model_validate(batch_data(verified_at=raw)).to_csv_row()["verified_at"]
         == raw
     )
+
+
+# --- Review fix B: plain-notation decimals ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw", ["1e2", " 12.5 ", "+5", "NaN", "Infinity", "1_000", ".5", "5."]
+)
+def test_decimal_rejects_non_plain_notation(raw):
+    """Only plain notation is accepted, so a number is written back as given."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(reading=raw))
+
+
+def test_master_limit_rejects_exponent():
+    """Limits follow the same plain-notation rule as readings."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(min_value="1e1"))
+
+
+@pytest.mark.parametrize("raw", [12.5, True])
+def test_decimal_rejects_float_and_bool(raw):
+    """Floats (inexact) and bools are never accepted as numbers."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(reading=raw))
+
+
+def test_decimal_rejects_exponent_decimal_object():
+    """A Decimal in exponent form would be rewritten on output, so it is rejected."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(reading=Decimal("1E+2")))
+
+
+def test_negative_reading_kept_as_written():
+    """Negative readings (e.g. a freezer temperature) are allowed and kept."""
+    row = BatchRow.model_validate(batch_data(reading="-20.5"))
+    assert row.to_csv_row()["reading"] == "-20.5"

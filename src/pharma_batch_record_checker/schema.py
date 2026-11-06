@@ -29,6 +29,29 @@ def _blank_to_none(value: Any) -> Any:
     return None if value == "" else value
 
 
+_PLAIN_DECIMAL_RE = re.compile(r"-?\d+(\.\d+)?")
+
+
+def _plain_decimal(value: Any) -> Any:
+    """Allow only blank or a plain-notation number ("12.5", "-20", "7.50"), so
+    it is written back exactly as given. Floats, bools and exponents are rejected."""
+    value = _blank_to_none(value)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+        text = str(value)
+    else:  # float (inexact), bool, or anything else
+        text = None
+    if text is None or not _PLAIN_DECIMAL_RE.fullmatch(text):
+        raise ValueError(
+            "number must be text, an int or a Decimal in plain notation, "
+            "e.g. 12.5 or -20"
+        )
+    return text
+
+
 # Timestamps are written as ISO 8601 with no timezone and whole seconds.
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S"
 _TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
@@ -126,9 +149,10 @@ class MasterRow(_CsvRow):
     max_value: Decimal | None
     critical: bool
 
-    _blanks = field_validator(
-        "parameter", "unit", "min_value", "max_value", mode="before"
-    )(_blank_to_none)
+    _blanks = field_validator("parameter", "unit", mode="before")(_blank_to_none)
+    _numbers = field_validator("batch_size", "min_value", "max_value", mode="before")(
+        _plain_decimal
+    )
 
     @field_validator("critical", mode="before")
     @classmethod
@@ -185,8 +209,8 @@ class BatchRow(_CsvRow):
     verified_at: NaiveDatetime | None
     comment: str | None
 
+    _numbers = field_validator("reading", mode="before")(_plain_decimal)
     _blanks = field_validator(
-        "reading",
         "unit",
         "performed_by",
         "verified_by",
