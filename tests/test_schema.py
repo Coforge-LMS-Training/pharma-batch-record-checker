@@ -11,6 +11,7 @@ from pharma_batch_record_checker.schema import (
     MASTER_HEADER,
     BatchRow,
     MasterRow,
+    _check_header,
 )
 
 # Exact client-approved headers, copied verbatim from the issue.
@@ -459,3 +460,43 @@ def test_master_step_seq_rejects_non_canonical(raw):
 def test_master_step_seq_accepts_int_and_digit_string(raw):
     """An int or its digit string both give the same step_seq."""
     assert MasterRow.model_validate(master_data(step_seq=raw)).step_seq == 3
+
+
+# --- Review 2 fix: ASCII digits and header check ----------------------------
+
+
+@pytest.mark.parametrize(
+    ("model", "data"),
+    [
+        pytest.param(BatchRow, batch_data(reading="١٢"), id="reading"),
+        pytest.param(MasterRow, master_data(batch_size="٥"), id="batch_size"),
+    ],
+)
+def test_decimal_rejects_non_ascii_digits(model, data):
+    """Non-ASCII digits would be rewritten as ASCII on output, so they are rejected."""
+    with pytest.raises(ValidationError):
+        model.model_validate(data)
+
+
+def test_step_seq_rejects_non_ascii_digits():
+    """step_seq accepts ASCII digits only."""
+    with pytest.raises(ValidationError):
+        MasterRow.model_validate(master_data(step_seq="٣"))
+
+
+def test_timestamp_rejects_non_ascii_digits():
+    """Timestamps accept ASCII digits only."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(performed_at="٢٠٢٦-01-15T08:30"))
+
+
+def test_check_header_accepts_real_models():
+    """Both models match their client header (also checked at import time)."""
+    _check_header(MasterRow, MASTER_HEADER)
+    _check_header(BatchRow, BATCH_HEADER)
+
+
+def test_check_header_raises_on_mismatch():
+    """A model whose field order differs from its header is caught immediately."""
+    with pytest.raises(RuntimeError):
+        _check_header(MasterRow, tuple(reversed(MASTER_HEADER)))

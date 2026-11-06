@@ -25,7 +25,6 @@ from pydantic import (
 # cell becomes None, while a whitespace-only cell is rejected so it can't pass
 # for a real value (or hide a missing one).
 Text = Annotated[str, StringConstraints(pattern=r"\S")]
-RequiredStr = Text
 
 
 def _blank_to_none(value: Any) -> Any:
@@ -33,8 +32,10 @@ def _blank_to_none(value: Any) -> Any:
     return None if value == "" else value
 
 
-_PLAIN_DECIMAL_RE = re.compile(r"-?\d+(\.\d+)?")
-_STEP_SEQ_RE = re.compile(r"[1-9]\d*")
+# Regexes use [0-9], not \d: \d also matches non-ASCII digits (e.g. "١٢"),
+# which Decimal would accept and then write back as ASCII.
+_PLAIN_DECIMAL_RE = re.compile(r"-?[0-9]+(\.[0-9]+)?")
+_STEP_SEQ_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _plain_decimal(value: Any) -> Any:
@@ -60,7 +61,7 @@ def _plain_decimal(value: Any) -> Any:
 # Timestamps are written as ISO 8601 to the minute, with no timezone, matching
 # the client samples (e.g. 2026-10-12T07:00).
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M"
-_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+_TIMESTAMP_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}")
 
 
 def _canonical_timestamp(value: Any) -> Any:
@@ -147,16 +148,16 @@ class MasterRow(_CsvRow):
     explicit unit string such as "pH".
     """
 
-    master_record_id: RequiredStr
-    master_version: RequiredStr
-    product_name: RequiredStr
+    master_record_id: Text
+    master_version: Text
+    product_name: Text
     batch_size: Annotated[Decimal, Field(gt=0)]
-    batch_size_unit: RequiredStr
+    batch_size_unit: Text
     step_seq: Annotated[int, Field(ge=1)]
-    step_id: RequiredStr
-    unit_procedure: RequiredStr
-    operation: RequiredStr
-    phase: RequiredStr
+    step_id: Text
+    unit_procedure: Text
+    operation: Text
+    phase: Text
     parameter: Text | None
     unit: Text | None
     min_value: Decimal | None
@@ -225,10 +226,10 @@ class BatchRow(_CsvRow):
     Timestamps have no timezone; timezone-aware values are rejected.
     """
 
-    batch_id: RequiredStr
-    master_record_id: RequiredStr
-    master_version: RequiredStr
-    step_id: RequiredStr
+    batch_id: Text
+    master_record_id: Text
+    master_version: Text
+    step_id: Text
     reading: Decimal | None
     unit: Text | None
     performed_by: Text | None
@@ -248,3 +249,21 @@ class BatchRow(_CsvRow):
     _timestamps = field_validator("performed_at", "verified_at", mode="before")(
         _canonical_timestamp
     )
+
+
+def _check_header(model: type[_CsvRow], header: tuple[str, ...]) -> None:
+    """Fail fast if a model's field order drifts from its client header.
+
+    The header constants are the client contract and stay explicit; this check
+    runs at import time so a reordered or added field breaks immediately
+    instead of at write time.
+    """
+    fields = tuple(model.model_fields)
+    if fields != header:
+        raise RuntimeError(
+            f"{model.__name__} fields {fields} do not match its header {header}"
+        )
+
+
+_check_header(MasterRow, MASTER_HEADER)
+_check_header(BatchRow, BATCH_HEADER)
