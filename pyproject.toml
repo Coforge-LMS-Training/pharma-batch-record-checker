@@ -1,0 +1,20 @@
+[project]
+name = "pharma-batch-record-checker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Sarthak-Coforge-03", email = "sarthak.kakkar@coforge.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]
+
+[project.scripts]
+pharma-batch-record-checker = "pharma_batch_record_checker:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
