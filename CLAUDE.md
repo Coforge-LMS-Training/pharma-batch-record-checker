@@ -34,6 +34,7 @@ Don't change another owner's contract without their agreement.
 
 ## Tooling
 - uv, Python 3.12, src layout (`src/pharma_batch_record_checker`). The entry point is `pharma_batch_record_checker:main`.
-- A hook runs `ruff check` after every `.py` edit (`.claude/hooks/ruff-check.sh`), and lint errors must be fixed.
-- Commands: `uv sync`, `uv run pharma-batch-record-checker`, `uv add [--dev] <pkg>`, `uv run ruff check . --fix`, `uv run ruff format .`, `uv run pytest` (once added).
+- Tests use pytest and live in `tests/` (`test_*.py`). `tests/test_smoke.py` is a placeholder to replace once real tests land.
+- After every `.py` edit, two hooks run: `ruff check` (`.claude/hooks/ruff-check.sh`), then the full pytest suite (`.claude/hooks/pytest-run.sh`). Lint errors and test failures must be fixed.
+- Commands: `uv sync`, `uv run pharma-batch-record-checker`, `uv add [--dev] <pkg>`, `uv run ruff check . --fix`, `uv run ruff format .`, `uv run pytest`, `uv run pytest tests/test_x.py::test_name` (single test).
 - Use one branch per Linear issue, open PRs into `main`, and keep `main` green.
