@@ -1,9 +1,10 @@
 """Write master_record.csv and batch_record.csv in the client-approved format.
 
-Output is UTF-8 with "\\n" line endings. The header is always written, in the
-exact client-approved order, even when there are no rows. Cells are quoted
-only when needed (for example, comments that contain commas, quotes or
-newlines). Reading CSVs is the parser's job and lives elsewhere.
+Output matches the client samples: UTF-8, no BOM, CRLF ("\\r\\n") line
+endings. The header is always written, in the exact client-approved order,
+even when there are no rows. Cells are quoted only when needed (for example,
+comments that contain commas, quotes or newlines). Reading CSVs is the
+parser's job and lives elsewhere.
 
 Writing to a path is atomic: rows go to a temporary file in the same folder,
 which replaces the destination only once every row is written. If a row fails,
@@ -33,7 +34,7 @@ def write_master_csv(rows: Iterable[MasterRow], dest: Destination) -> None:
     """Write master record rows, with the header, to a path or open text file.
 
     An open file must be opened with newline="" (as the csv module requires),
-    otherwise the platform may rewrite the "\\n" line endings.
+    otherwise the platform may rewrite the CRLF line endings.
     """
     _write_csv(MASTER_HEADER, rows, dest)
 
@@ -42,7 +43,7 @@ def write_batch_csv(rows: Iterable[BatchRow], dest: Destination) -> None:
     """Write executed batch rows, with the header, to a path or open text file.
 
     An open file must be opened with newline="" (as the csv module requires),
-    otherwise the platform may rewrite the "\\n" line endings.
+    otherwise the platform may rewrite the CRLF line endings.
     """
     _write_csv(BATCH_HEADER, rows, dest)
 
@@ -99,7 +100,7 @@ def _write_rows(
     writer = csv.DictWriter(
         f,
         fieldnames=header,
-        lineterminator="\n",
+        lineterminator="\r\n",  # CRLF, as in the client samples
         quoting=csv.QUOTE_MINIMAL,
     )
     writer.writeheader()

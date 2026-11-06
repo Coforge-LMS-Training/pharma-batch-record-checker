@@ -19,6 +19,11 @@ CLIENT_BATCH_HEADER = (
 )
 
 
+def raw_text(path):
+    """File contents with line endings untouched (read_text would hide CRLF)."""
+    return path.read_bytes().decode("utf-8")
+
+
 def master_rows():
     """Two synthetic master steps: one measured and critical, one sign-off only."""
     common = {
@@ -78,14 +83,14 @@ def test_write_master_csv_first_line_is_exact_header(tmp_path):
     """The raw first line of master_record.csv is the client-approved header."""
     path = tmp_path / "master_record.csv"
     write_master_csv(master_rows(), path)
-    assert path.read_text(encoding="utf-8").split("\n")[0] == CLIENT_MASTER_HEADER
+    assert raw_text(path).split("\r\n")[0] == CLIENT_MASTER_HEADER
 
 
 def test_write_batch_csv_first_line_is_exact_header(tmp_path):
     """The raw first line of batch_record.csv is the client-approved header."""
     path = tmp_path / "batch_record.csv"
     write_batch_csv([batch_row()], path)
-    assert path.read_text(encoding="utf-8").split("\n")[0] == CLIENT_BATCH_HEADER
+    assert raw_text(path).split("\r\n")[0] == CLIENT_BATCH_HEADER
 
 
 def test_write_master_csv_rows_round_trip(tmp_path):
@@ -102,7 +107,7 @@ def test_write_batch_csv_blank_fields_are_empty_cells(tmp_path):
     path = tmp_path / "batch_record.csv"
     row = batch_row(performed_by="", performed_at="", verified_by="", verified_at="")
     write_batch_csv([row], path)
-    data_line = path.read_text(encoding="utf-8").split("\n")[1]
+    data_line = raw_text(path).split("\r\n")[1]
     assert data_line == "B-TAB-0001,MR-TAB-001,1,S010,12.5,min,,,,,"
 
 
@@ -115,11 +120,20 @@ def test_write_batch_csv_quotes_tricky_comment(tmp_path):
         assert next(csv.DictReader(f))["comment"] == comment
 
 
+def test_write_csv_uses_crlf_line_endings(tmp_path):
+    """Every record ends with CRLF, as in the client samples; no bare LF."""
+    path = tmp_path / "master_record.csv"
+    write_master_csv(master_rows(), path)
+    data = path.read_bytes()
+    assert data.endswith(b"\r\n")
+    assert data.count(b"\n") == data.count(b"\r\n") == 3
+
+
 def test_write_csv_empty_rows_writes_header_only(tmp_path):
     """With no rows, the file holds just the header line."""
     path = tmp_path / "master_record.csv"
     write_master_csv([], path)
-    assert path.read_text(encoding="utf-8") == CLIENT_MASTER_HEADER + "\n"
+    assert raw_text(path) == CLIENT_MASTER_HEADER + "\r\n"
 
 
 def test_write_csv_accepts_open_file(tmp_path):
@@ -128,7 +142,7 @@ def test_write_csv_accepts_open_file(tmp_path):
     write_batch_csv([batch_row()], path)
     buffer = io.StringIO()
     write_batch_csv([batch_row()], buffer)
-    assert buffer.getvalue() == path.read_text(encoding="utf-8")
+    assert buffer.getvalue() == raw_text(path)
 
 
 # --- Review fix E: path types and atomic writes -----------------------------
@@ -144,7 +158,7 @@ def test_write_csv_accepts_str_path(tmp_path):
     """A plain string path is written like a Path, not treated as a stream."""
     path = tmp_path / "batch_record.csv"
     write_batch_csv([batch_row()], str(path))
-    assert path.read_text(encoding="utf-8").split("\n")[0] == CLIENT_BATCH_HEADER
+    assert raw_text(path).split("\r\n")[0] == CLIENT_BATCH_HEADER
 
 
 def test_write_csv_failure_keeps_existing_file(tmp_path):
