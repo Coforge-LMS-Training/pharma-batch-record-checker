@@ -444,3 +444,21 @@ def test_build_masters_allows_new_version_of_same_master():
     rows = build_masters((SYN500, v4))
     assert len(rows) == 32
     assert {r.master_version for r in rows} == {"3", "4"}
+
+
+# --- Review fix D: errors name the product and step -------------------------
+
+
+def test_build_master_error_names_product_and_step():
+    """A bad limit says which master and step it belongs to."""
+    limits = {**PLC250.limits, "S-ENC-02": ("330", "300")}
+    config = dataclasses.replace(PLC250, limits=limits)
+    with pytest.raises(ValueError, match=r"MBR-PLC250 v1 step S-ENC-02"):
+        build_master(config)
+
+
+def test_build_master_bad_identity_names_product():
+    """A bad product field says which master it belongs to."""
+    config = dataclasses.replace(PLC250, batch_size="200,000")
+    with pytest.raises(ValueError, match=r"MBR-PLC250 v1"):
+        build_master(config)

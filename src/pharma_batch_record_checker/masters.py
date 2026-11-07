@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+from pydantic import ValidationError
+
 from pharma_batch_record_checker.csv_io import Destination, write_master_csv
 from pharma_batch_record_checker.schema import MasterRow
 
@@ -113,8 +115,29 @@ def _check_limits(config: ProductConfig) -> None:
 
 
 def _build_row(config: ProductConfig, step_seq: int, step: StepTemplate) -> MasterRow:
-    """Combine one process step with the product's identity and limits."""
+    """Combine one process step with the product's identity and limits.
+
+    A validation error is re-raised as ValueError naming the master and step,
+    so a mistake in a new ProductConfig is easy to find.
+    """
     min_value, max_value = config.limits.get(step.step_id, ("", ""))
+    try:
+        return _master_row(config, step_seq, step, min_value, max_value)
+    except ValidationError as error:
+        where = (
+            f"{config.master_record_id} v{config.master_version} step {step.step_id}"
+        )
+        raise ValueError(f"{where}: {error}") from error
+
+
+def _master_row(
+    config: ProductConfig,
+    step_seq: int,
+    step: StepTemplate,
+    min_value: str,
+    max_value: str,
+) -> MasterRow:
+    """Construct the validated MasterRow for one step."""
     return MasterRow(
         master_record_id=config.master_record_id,
         master_version=config.master_version,
