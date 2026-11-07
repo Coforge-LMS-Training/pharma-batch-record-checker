@@ -3,7 +3,9 @@
 `rule_violations` is a small reference implementation of the rules exactly as
 CLAUDE.md states them. It lives in the tests only (the real rule engine is the
 parser/rule-engine owner's) so generator output can be checked against the
-agreed rules; PHA-36/37 can reuse it.
+agreed rules; PHA-36/37 can reuse it. On top of the 8 rules it reports two
+structural problems a clean batch must not have either: `duplicate_row` and
+`unexpected_row` (a row whose join key matches no master step).
 """
 
 from datetime import datetime
@@ -19,9 +21,18 @@ from pharma_batch_record_checker.schema import BatchRow, MasterRow
 def rule_violations(master: list[MasterRow], batch: list[BatchRow]) -> list[str]:
     """Return "rule:step_id" for every broken rule (rule_version 1.0.0)."""
     found = []
-    by_step = {row.step_id: row for row in batch}
+    master_keys = {_join_key(step) for step in master}
+    by_key: dict[tuple[str, str, str], BatchRow] = {}
+    for row in batch:
+        key = _join_key(row)
+        if key in by_key:
+            found.append(f"duplicate_row:{row.step_id}")
+        elif key not in master_keys:
+            found.append(f"unexpected_row:{row.step_id}")
+        else:
+            by_key[key] = row
     for step in master:
-        row = by_step.get(step.step_id)
+        row = by_key.get(_join_key(step))
         if row is None:
             found.append(f"missing_step:{step.step_id}")
             continue
@@ -50,6 +61,11 @@ def rule_violations(master: list[MasterRow], batch: list[BatchRow]) -> list[str]
         ):
             found.append(f"verifier_before_performer:{step.step_id}")
     return found
+
+
+def _join_key(row: MasterRow | BatchRow) -> tuple[str, str, str]:
+    """The agreed join key: (master_record_id, master_version, step_id)."""
+    return (row.master_record_id, row.master_version, row.step_id)
 
 
 @pytest.mark.parametrize("product", [SYN500, PLC250], ids=lambda p: p.master_record_id)
@@ -100,4 +116,35 @@ def test_oracle_catches_same_person_and_missing_step():
     assert rule_violations(master, batch) == [
         "same_person:S-COMP-02",
         "missing_step:S-PACK-02",
+    ]
+
+
+def clean_syn500():
+    """The SYN500 master and a clean batch for it (seed 0)."""
+    master = build_master(SYN500)
+    return master, generate_clean_batch(
+        master, "T26-0001", datetime(2026, 10, 12, 7, 0), 0
+    )
+
+
+def test_oracle_flags_duplicate_row():
+    """A step recorded twice is reported, not silently collapsed."""
+    master, batch = clean_syn500()
+    assert rule_violations(master, [*batch, batch[3]]) == ["duplicate_row:S-GRAN-02"]
+
+
+def test_oracle_flags_row_not_in_master():
+    """A row for a step the master doesn't have is reported."""
+    master, batch = clean_syn500()
+    extra = batch[0].model_copy(update={"step_id": "S-NOPE-99"})
+    assert rule_violations(master, [*batch, extra]) == ["unexpected_row:S-NOPE-99"]
+
+
+def test_oracle_flags_wrong_master_key():
+    """A row with the wrong master_version doesn't count as executing that step."""
+    master, batch = clean_syn500()
+    batch[5] = batch[5].model_copy(update={"master_version": "2"})
+    assert rule_violations(master, batch) == [
+        "unexpected_row:S-GRAN-04",
+        "missing_step:S-GRAN-04",
     ]
