@@ -374,3 +374,55 @@ def test_replace_copy_does_not_share_limits():
     with pytest.raises(TypeError):
         copy.limits["S-COMP-01"] = ("0", "9999")
     assert SYN500.limits["S-COMP-01"] == ("640", "680")
+
+
+# --- Review fix B: template validation and placeholders ---------------------
+
+
+def step(**overrides):
+    """A measured StepTemplate; overrides replace individual fields."""
+    fields = {
+        "step_id": "S-MIX-02",
+        "unit_procedure": "Mixing",
+        "operation": "Dry mix",
+        "phase": "Mix",
+        "parameter": "Mix time",
+        "unit": "min",
+        "critical": False,
+    }
+    fields.update(overrides)
+    return StepTemplate(**fields)
+
+
+@pytest.mark.parametrize("field", ["parameter", "unit"])
+def test_step_template_rejects_empty_parameter_or_unit(field):
+    """'' is ambiguous; a sign-off step uses None for both, a measured step text."""
+    with pytest.raises(ValueError, match=field):
+        step(**{field: ""})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"unit": None}, id="parameter_without_unit"),
+        pytest.param({"parameter": None}, id="unit_without_parameter"),
+    ],
+)
+def test_step_template_parameter_and_unit_go_together(overrides):
+    """A step is either measured (parameter and unit) or sign-off-only (neither)."""
+    with pytest.raises(ValueError, match="S-MIX-02"):
+        step(**overrides)
+
+
+def test_build_master_rejects_duplicate_step_ids():
+    """A repeated step_id would break the join key, so the build fails."""
+    config = tiny_product(process=(*TINY_PROCESS, TINY_PROCESS[2]))
+    with pytest.raises(ValueError, match="S-PACK-01"):
+        build_master(config)
+
+
+def test_build_master_keeps_other_braces_literal():
+    """Only {excipient} is filled in; any other braces are kept as written."""
+    process = (step(phase="Set {60} rpm for {excipient}"),)
+    config = tiny_product(process=process, limits={"S-MIX-02": ("1", "2")})
+    assert build_master(config)[0].phase == "Set {60} rpm for starch"

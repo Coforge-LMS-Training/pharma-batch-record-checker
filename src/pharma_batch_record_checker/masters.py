@@ -24,8 +24,12 @@ from pharma_batch_record_checker.schema import MasterRow
 class StepTemplate:
     """One step of a process template.
 
-    Text fields may contain "{excipient}", filled in from the product.
-    A sign-off-only step has parameter and unit set to None.
+    unit_procedure, operation, phase and parameter may contain "{excipient}",
+    filled in from the product; any other braces are kept as written. unit is
+    never filled in, because units are compared as exact strings.
+
+    A measured step has both a parameter and a unit (non-empty text). A
+    sign-off-only step has both set to None.
     """
 
     step_id: str
@@ -35,6 +39,17 @@ class StepTemplate:
     parameter: str | None
     unit: str | None
     critical: bool
+
+    def __post_init__(self) -> None:
+        """Reject '' and half-measured steps, so sign-off detection is unambiguous."""
+        for name in ("parameter", "unit"):
+            if getattr(self, name) == "":
+                raise ValueError(f"{self.step_id}: {name} must be text or None, not ''")
+        if (self.parameter is None) != (self.unit is None):
+            raise ValueError(
+                f"{self.step_id}: parameter and unit must both be set (measured "
+                "step) or both be None (sign-off-only step)"
+            )
 
 
 @dataclass(frozen=True)
@@ -66,11 +81,19 @@ def build_master(config: ProductConfig) -> list[MasterRow]:
 
     Raises ValueError if the limits don't cover exactly the measured steps.
     """
+    _check_process(config)
     _check_limits(config)
     return [
         _build_row(config, step_seq, step)
         for step_seq, step in enumerate(config.process, start=1)
     ]
+
+
+def _check_process(config: ProductConfig) -> None:
+    """step_id is part of the join key, so it must be unique within a process."""
+    ids = [s.step_id for s in config.process]
+    if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
+        raise ValueError(f"{config.master_record_id}: duplicate step_ids {duplicates}")
 
 
 def _check_limits(config: ProductConfig) -> None:
@@ -103,7 +126,7 @@ def _build_row(config: ProductConfig, step_seq: int, step: StepTemplate) -> Mast
         unit_procedure=_fill(step.unit_procedure, config),
         operation=_fill(step.operation, config),
         phase=_fill(step.phase, config),
-        parameter=_fill(step.parameter, config) if step.parameter else "",
+        parameter="" if step.parameter is None else _fill(step.parameter, config),
         unit=step.unit or "",
         min_value=min_value,
         max_value=max_value,
@@ -112,8 +135,8 @@ def _build_row(config: ProductConfig, step_seq: int, step: StepTemplate) -> Mast
 
 
 def _fill(text: str, config: ProductConfig) -> str:
-    """Fill product placeholders such as {excipient} in template text."""
-    return text.format(excipient=config.excipient)
+    """Fill the {excipient} placeholder; other braces are left as written."""
+    return text.replace("{excipient}", config.excipient)
 
 
 # --- Process templates --------------------------------------------------------
