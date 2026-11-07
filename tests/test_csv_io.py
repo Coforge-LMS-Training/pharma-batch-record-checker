@@ -12,7 +12,13 @@ from pharma_batch_record_checker.csv_io import (
     write_csv,
     write_master_csv,
 )
-from pharma_batch_record_checker.schema import BATCH_HEADER, BatchRow, MasterRow
+from pharma_batch_record_checker.schema import (
+    BatchRow,
+    CsvRow,
+    MasterRow,
+    Text,
+    check_header,
+)
 
 CLIENT_MASTER_HEADER = (
     "master_record_id,master_version,product_name,batch_size,batch_size_unit,"
@@ -255,10 +261,20 @@ def test_write_csv_keeps_existing_file_mode(tmp_path):
 
 
 def test_write_csv_is_public_contract(tmp_path):
-    """write_csv(header, rows, dest) writes any CsvRow type in the contract format."""
-    path = tmp_path / "rows.csv"
-    write_csv(BATCH_HEADER, [batch_row()], path)
-    assert path.read_bytes().split(b"\r\n")[0].decode() == ",".join(BATCH_HEADER)
+    """write_csv writes any CsvRow type, not just masters and batches."""
+
+    class Pair(CsvRow):
+        """A two-column row type defined outside the contract modules."""
+
+        key: Text
+        value: Text | None
+
+    check_header(Pair, ("key", "value"))
+    path = tmp_path / "pairs.csv"
+    write_csv(
+        ("key", "value"), [Pair(key="a", value="1, 2"), Pair(key="b", value=None)], path
+    )
+    assert path.read_bytes() == b'key,value\r\na,"1, 2"\r\nb,\r\n'
 
 
 def test_deprecated_write_csv_alias():
