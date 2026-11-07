@@ -36,6 +36,9 @@ RULE_IDS: tuple[str, ...] = get_args(RuleId)
 Severity = Literal["Critical", "Needs Review"]
 CRITICAL, NEEDS_REVIEW = get_args(Severity)
 
+# Rules that apply to critical steps only.
+CRITICAL_ONLY_RULES: frozenset[str] = frozenset({"missing_second_check", "same_person"})
+
 # On a critical step, any one of these findings makes the step Critical.
 CRITICAL_ON_CRITICAL_STEP: frozenset[str] = frozenset(
     {"missing_second_check", "same_person", "out_of_range"}
@@ -79,11 +82,16 @@ def expected_findings(planted: Iterable[PlantedDefect]) -> list[ExpectedFinding]
     Severity is per (batch, step): Critical if the step has 2+ findings, or
     is a critical step with missing_second_check, same_person or
     out_of_range; otherwise Needs Review. Every finding on the step carries it.
+
+    Raises ValueError if the defects planted on a step could not all fire
+    (see `_check_step`), so the file never expects a finding that can't occur.
     """
     planted = list(planted)
     by_step: dict[tuple[str, str], list[PlantedDefect]] = {}
     for defect in planted:
         by_step.setdefault((defect.batch_id, defect.step_id), []).append(defect)
+    for (batch_id, step_id), defects in by_step.items():
+        _check_step(batch_id, step_id, defects)
     severity = {key: _step_severity(defects) for key, defects in by_step.items()}
     return [
         ExpectedFinding(
@@ -94,6 +102,39 @@ def expected_findings(planted: Iterable[PlantedDefect]) -> list[ExpectedFinding]
         )
         for d in planted
     ]
+
+
+def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> None:
+    """Refuse defects on one step that could not all produce their findings."""
+    rules = [d.rule_id for d in defects]
+    rule_set = set(rules)
+    problems = []
+    if unknown := sorted(rule_set - set(RULE_IDS)):
+        problems.append(f"unknown rule_ids {unknown}")
+    if repeated := sorted({r for r in rules if rules.count(r) > 1}):
+        problems.append(f"rules planted more than once {repeated}")
+    if not defects[0].critical and (only := sorted(rule_set & CRITICAL_ONLY_RULES)):
+        problems.append(f"{only} apply to critical steps only")
+    if "missing_step" in rule_set and len(rule_set) > 1:
+        problems.append("missing_step leaves no row for other findings")
+    if "out_of_range" in rule_set and rule_set & {"missing_reading", "unit_mismatch"}:
+        problems.append(
+            "out_of_range can't fire when the reading is missing or the unit "
+            "mismatches (the range check is skipped)"
+        )
+    if "missing_second_check" in rule_set and rule_set & {
+        "same_person",
+        "verifier_before_performer",
+    }:
+        problems.append(
+            "missing_second_check leaves no verifier for same_person or "
+            "verifier_before_performer"
+        )
+    if problems:
+        raise ValueError(
+            f"batch {batch_id} step {step_id} {sorted(rule_set)}: "
+            + "; ".join(problems)
+        )
 
 
 def _step_severity(defects: list[PlantedDefect]) -> str:

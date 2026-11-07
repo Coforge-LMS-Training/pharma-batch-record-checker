@@ -175,3 +175,67 @@ def test_output_keeps_planted_order():
         )
     )
     assert [f.step_id for f in findings] == ["S-GRAN-03", "S-COMP-01", "S-GRAN-02"]
+
+
+# --- Slice 3: refusing inconsistent planting --------------------------------
+
+
+def test_rejects_unknown_rule_when_planting():
+    """A misspelled rule is refused when expectations are built."""
+    with pytest.raises(ValueError, match="out_of_ranges"):
+        expected_findings(plant((PLAIN, "out_of_ranges")))
+
+
+def test_rejects_same_rule_twice_on_a_step():
+    """Each broken rule is one finding; planting it twice on a step is a mistake."""
+    with pytest.raises(ValueError, match="unit_mismatch"):
+        expected_findings(plant((PLAIN, "unit_mismatch"), (PLAIN, "unit_mismatch")))
+
+
+@pytest.mark.parametrize("rule_id", ["missing_second_check", "same_person"])
+def test_rejects_critical_only_rule_on_non_critical_step(rule_id):
+    """These rules only apply to critical steps, so they can't fire elsewhere."""
+    with pytest.raises(ValueError, match=rule_id):
+        expected_findings(plant((PLAIN, rule_id)))
+
+
+def test_rejects_missing_step_with_other_findings():
+    """A step with no row can't also have a wrong unit or missing performer."""
+    with pytest.raises(ValueError, match="missing_step"):
+        expected_findings(plant((PLAIN, "missing_step"), (PLAIN, "unit_mismatch")))
+
+
+@pytest.mark.parametrize("other", ["missing_reading", "unit_mismatch"])
+def test_rejects_out_of_range_with_skipped_range_check(other):
+    """The range check is skipped when the reading is missing or the unit is wrong."""
+    with pytest.raises(ValueError, match="out_of_range"):
+        expected_findings(plant((CRIT, other), (CRIT, "out_of_range")))
+
+
+@pytest.mark.parametrize("other", ["same_person", "verifier_before_performer"])
+def test_rejects_missing_second_check_with_verifier_rules(other):
+    """With no second check there is no verifier to be the same or too early."""
+    with pytest.raises(ValueError, match="missing_second_check"):
+        expected_findings(plant((CRIT, "missing_second_check"), (CRIT, other)))
+
+
+def test_allows_compatible_combination():
+    """Rules that can fire together are fine; 2 findings make the step Critical."""
+    findings = expected_findings(
+        plant((PLAIN, "out_of_range"), (PLAIN, "missing_performer"))
+    )
+    assert [(f.rule_id, f.severity) for f in findings] == [
+        ("out_of_range", CRITICAL),
+        ("missing_performer", CRITICAL),
+    ]
+
+
+def test_error_names_batch_step_and_rules():
+    """The error says exactly where the inconsistent planting is."""
+    with pytest.raises(ValueError, match=r"T26-0009 step S-GRAN-02"):
+        expected_findings(
+            plant(
+                ("T26-0009", PLAIN, "missing_step"),
+                ("T26-0009", PLAIN, "missing_performer"),
+            )
+        )
