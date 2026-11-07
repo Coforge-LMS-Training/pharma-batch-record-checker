@@ -77,11 +77,12 @@ def _write_path_atomically(
     - The data is fsynced before the rename, so a crash can't leave an empty
       or truncated file in place of the old one.
     - On any failure (a row, chmod or the rename), the temp file is removed.
-    - The new file keeps the existing file's permissions, or gets 0o644 if
-      the file is new (a bare temp file would otherwise be owner-only, 0o600).
+    - The new file keeps the existing file's permissions. A brand-new file
+      gets 0o666 minus the umask, exactly what a plain open() would give
+      (a bare temp file would otherwise always be owner-only, 0o600).
     """
     path = path.resolve()
-    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o666 & ~_current_umask()
     tmp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -103,6 +104,18 @@ def _write_path_atomically(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
         raise
+
+
+def _current_umask() -> int:
+    """Return the process umask.
+
+    The OS only exposes the umask by setting it, so this sets it to 0 and
+    immediately restores it. The umask is briefly changed process-wide, which
+    is fine for this single-threaded CLI.
+    """
+    umask = os.umask(0)
+    os.umask(umask)
+    return umask
 
 
 def _write_rows(

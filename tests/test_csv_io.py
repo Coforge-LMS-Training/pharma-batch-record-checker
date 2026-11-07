@@ -214,3 +214,36 @@ def test_write_csv_follows_symlink(tmp_path):
     write_batch_csv([batch_row()], link)
     assert link.is_symlink()
     assert raw_text(target).split("\r\n")[0] == CLIENT_BATCH_HEADER
+
+
+# --- Review 3 fix: file permissions -----------------------------------------
+
+
+def write_new_file_with_umask(tmp_path, umask):
+    """Write a new batch CSV under the given umask and return its mode bits."""
+    old = os.umask(umask)
+    try:
+        path = tmp_path / "batch_record.csv"
+        write_batch_csv([batch_row()], path)
+    finally:
+        os.umask(old)
+    return path.stat().st_mode & 0o777
+
+
+def test_write_csv_new_file_respects_umask(tmp_path):
+    """A private umask (077) keeps a new batch file owner-only, like open() would."""
+    assert write_new_file_with_umask(tmp_path, 0o077) == 0o600
+
+
+def test_write_csv_new_file_default_umask(tmp_path):
+    """Under the common umask 022 a new file is 0o644."""
+    assert write_new_file_with_umask(tmp_path, 0o022) == 0o644
+
+
+def test_write_csv_keeps_existing_file_mode(tmp_path):
+    """Rewriting an existing file keeps its permission bits."""
+    path = tmp_path / "batch_record.csv"
+    path.write_text("old", encoding="utf-8")
+    path.chmod(0o640)
+    write_batch_csv([batch_row()], path)
+    assert path.stat().st_mode & 0o777 == 0o640
