@@ -10,6 +10,7 @@ from pharma_batch_record_checker.batches import (
     BENIGN_COMMENTS,
     generate_clean_batch,
     limit_quantum,
+    repeated,
 )
 from pharma_batch_record_checker.masters import (
     PLC250,
@@ -363,3 +364,9 @@ def test_limit_quantum(product, step_id, quantum):
     """The reading grid step is the finest precision among the step's limits."""
     (step,) = [s for s in build_master(product) if s.step_id == step_id]
     assert str(limit_quantum(step)) == quantum
+
+
+def test_repeated():
+    """Values that occur more than once, sorted, each listed once."""
+    assert repeated(["b", "a", "b", "c", "a", "b"]) == ["a", "b"]
+    assert repeated(["a", "b"]) == []

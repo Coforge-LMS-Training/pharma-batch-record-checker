@@ -462,3 +462,12 @@ def test_build_master_bad_identity_names_product():
     config = dataclasses.replace(PLC250, batch_size="200,000")
     with pytest.raises(ValueError, match=r"MBR-PLC250 v1"):
         build_master(config)
+
+
+# --- PHA-37 follow-up: hashable configs -------------------------------------
+
+
+def test_product_config_is_hashable():
+    """A frozen config can be used in sets and as a dict key."""
+    assert hash(SYN500) == hash(dataclasses.replace(SYN500))
+    assert len({SYN500, PLC250, dataclasses.replace(SYN500)}) == 2

@@ -7,7 +7,6 @@ synthetic.
 """
 
 import zlib
-from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -19,6 +18,7 @@ from pharma_batch_record_checker.batches import (
     VERIFIERS,
     generate_clean_batch,
     limit_quantum,
+    repeated,
 )
 from pharma_batch_record_checker.expected_findings import (
     DefectLog,
@@ -30,7 +30,6 @@ from pharma_batch_record_checker.masters import (
     SYN500,
     ProductConfig,
     build_master,
-    build_masters,
 )
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 
@@ -143,7 +142,7 @@ def _check_clean_batch(
             f"clean batch executes {sorted(batch_keys)}, not master {sorted(master_keys)}"
         )
     step_ids = [row.step_id for row in clean_batch]
-    if duplicates := sorted(i for i, n in Counter(step_ids).items() if n > 1):
+    if duplicates := repeated(step_ids):
         raise ValueError(f"clean batch repeats steps {duplicates}")
     if unknown := sorted(set(step_ids) - {s.step_id for s in master}):
         raise ValueError(f"clean batch has steps not in the master {unknown}")
@@ -249,7 +248,7 @@ class BatchPlan:
     batch_id: str
     start: datetime
     defects: tuple[Defect, ...] = ()
-    comments: Mapping[str, str] = field(default_factory=dict)
+    comments: Mapping[str, str] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         """Keep a read-only copy of comments, so plans can't change in place."""
@@ -323,17 +322,38 @@ def build_dataset(seed: int, plans: Sequence[BatchPlan] = BATCH_PLANS) -> Datase
     use. Expected findings are recorded while planting, never computed later.
     """
     _check_unique_batch_ids(plans)
+    masters = _masters_for(plans)
     log = DefectLog()
     batches: list[BatchRow] = []
     for plan in plans:
-        master = build_master(plan.product)
+        master = masters[_master_key(plan.product)]
         batch_seed = _batch_seed(seed, plan.batch_id)
         clean = generate_clean_batch(master, plan.batch_id, plan.start, batch_seed)
         batches += plant_defects(master, clean, plan.defects, log, plan.comments)
-    products = list({id(p.product): p.product for p in plans}.values())
-    return Dataset(
-        masters=build_masters(products), batches=batches, findings=log.findings()
-    )
+    master_rows = [row for rows in masters.values() for row in rows]
+    return Dataset(masters=master_rows, batches=batches, findings=log.findings())
+
+
+def _master_key(product: ProductConfig) -> tuple[str, str]:
+    """A master is identified by its id and version."""
+    return (product.master_record_id, product.master_version)
+
+
+def _masters_for(plans: Sequence[BatchPlan]) -> dict[tuple[str, str], list[MasterRow]]:
+    """Build each distinct product's master once, in first-use order.
+
+    Products are the same master when their id and version match. Equal
+    configs share one master; different configs under one key are refused.
+    """
+    products: dict[tuple[str, str], ProductConfig] = {}
+    for plan in plans:
+        key = _master_key(plan.product)
+        if key in products and products[key] != plan.product:
+            raise ValueError(
+                f"different product configs claim master {key[0]} v{key[1]}"
+            )
+        products.setdefault(key, plan.product)
+    return {key: build_master(product) for key, product in products.items()}
 
 
 def _batch_seed(seed: int, batch_id: str) -> int:
@@ -343,6 +363,5 @@ def _batch_seed(seed: int, batch_id: str) -> int:
 
 def _check_unique_batch_ids(plans: Sequence[BatchPlan]) -> None:
     """Two plans with one batch_id would merge into a single batch."""
-    ids = [plan.batch_id for plan in plans]
-    if duplicates := sorted(i for i, n in Counter(ids).items() if n > 1):
+    if duplicates := repeated(plan.batch_id for plan in plans):
         raise ValueError(f"duplicate batch_ids in plans {duplicates}")
