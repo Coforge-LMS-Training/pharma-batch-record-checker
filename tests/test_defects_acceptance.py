@@ -4,15 +4,12 @@ Expected findings are produced while planting (DefectLog). The test-only rule
 oracle is run here only to confirm they match; the generator never runs it.
 """
 
-import ast
-import sys
 from collections import Counter
-from pathlib import Path
 
 import pytest
+from import_guard import disallowed_imports
 from rule_oracle import rule_violations
 
-import pharma_batch_record_checker.defects as defects_module
 from pharma_batch_record_checker.defects import (
     BATCH_PLANS,
     INSTRUCTION_COMMENTS,
@@ -172,7 +169,7 @@ def test_expected_findings_match_oracle_for_any_seed(seed):
         )
 
 
-ALLOWED_PROJECT_IMPORTS = {
+DEFECTS_ALLOWED_PROJECT = {
     "pharma_batch_record_checker.schema",
     "pharma_batch_record_checker.csv_io",
     "pharma_batch_record_checker.batches",
@@ -182,22 +179,13 @@ ALLOWED_PROJECT_IMPORTS = {
 
 
 def test_defects_module_imports_no_rules_engine():
-    """Planting never imports a rules engine or the test oracle."""
-    tree = ast.parse(Path(defects_module.__file__).read_text("utf-8"))
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            imported.add(node.module)
-    disallowed = {
-        name
-        for name in imported
-        if name.split(".")[0] not in sys.stdlib_module_names
-        and name.split(".")[0] != "pydantic"
-        and name not in ALLOWED_PROJECT_IMPORTS
-    }
-    assert disallowed == set()
+    """Planting never imports a rules engine or the test oracle, even indirectly."""
+    assert (
+        disallowed_imports(
+            "pharma_batch_record_checker.defects", DEFECTS_ALLOWED_PROJECT
+        )
+        == set()
+    )
 
 
 # --- Review fix B: dataset correctness --------------------------------------

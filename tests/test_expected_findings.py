@@ -3,16 +3,13 @@
 Expected findings come only from planted defects, never from a rules engine.
 """
 
-import ast
 import csv
 import io
-import sys
-from pathlib import Path
 
 import pytest
+from import_guard import disallowed_imports
 from pydantic import ValidationError
 
-import pharma_batch_record_checker.expected_findings as expected_findings_module
 from pharma_batch_record_checker.expected_findings import (
     CRITICAL,
     EXPECTED_FINDINGS_HEADER,
@@ -333,25 +330,16 @@ ALLOWED_PROJECT_IMPORTS = {
 def test_module_imports_no_rules_engine():
     """Expected findings come only from planted defects: no engine, no oracle.
 
-    Every import in expected_findings.py must be stdlib, pydantic, or our
-    schema/csv_io modules, so expectations can never be computed by running
-    the rules being tested.
+    Everything expected_findings.py imports, directly or through our schema
+    and csv_io modules, must be stdlib, pydantic or those modules, so
+    expectations can never be computed by running the rules being tested.
     """
-    tree = ast.parse(Path(expected_findings_module.__file__).read_text("utf-8"))
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported |= {alias.name for alias in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            imported.add(node.module)
-    disallowed = {
-        name
-        for name in imported
-        if name.split(".")[0] not in sys.stdlib_module_names
-        and name.split(".")[0] != "pydantic"
-        and name not in ALLOWED_PROJECT_IMPORTS
-    }
-    assert disallowed == set()
+    assert (
+        disallowed_imports(
+            "pharma_batch_record_checker.expected_findings", ALLOWED_PROJECT_IMPORTS
+        )
+        == set()
+    )
 
 
 # --- Review fix A: check each defect when it is recorded --------------------
