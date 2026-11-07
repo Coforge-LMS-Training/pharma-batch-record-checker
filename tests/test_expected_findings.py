@@ -3,12 +3,16 @@
 Expected findings come only from planted defects, never from a rules engine.
 """
 
+import ast
 import csv
 import io
+import sys
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import pharma_batch_record_checker.expected_findings as expected_findings_module
 from pharma_batch_record_checker.expected_findings import (
     CRITICAL,
     EXPECTED_FINDINGS_HEADER,
@@ -316,3 +320,35 @@ def test_defect_log_write(tmp_path):
     sample_log().write(path)
     assert path.read_bytes().decode("utf-8").startswith(f"{HEADER_LINE}\r\n")
     assert path.read_bytes().count(b"\r\n") == 4
+
+
+# --- Slice 5: independence from the rules engine ----------------------------
+
+ALLOWED_PROJECT_IMPORTS = {
+    "pharma_batch_record_checker.schema",
+    "pharma_batch_record_checker.csv_io",
+}
+
+
+def test_module_imports_no_rules_engine():
+    """Expected findings come only from planted defects: no engine, no oracle.
+
+    Every import in expected_findings.py must be stdlib, pydantic, or our
+    schema/csv_io modules, so expectations can never be computed by running
+    the rules being tested.
+    """
+    tree = ast.parse(Path(expected_findings_module.__file__).read_text("utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            imported.add(node.module)
+    disallowed = {
+        name
+        for name in imported
+        if name.split(".")[0] not in sys.stdlib_module_names
+        and name.split(".")[0] != "pydantic"
+        and name not in ALLOWED_PROJECT_IMPORTS
+    }
+    assert disallowed == set()
