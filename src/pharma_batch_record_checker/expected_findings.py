@@ -5,6 +5,7 @@ never from a rules engine's output, so the file can be used to check that
 engine independently. Columns: batch_id, step_id, rule_id, severity.
 """
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, get_args
@@ -40,10 +41,9 @@ CRITICAL, NEEDS_REVIEW = get_args(Severity)
 # Rules that apply to critical steps only.
 CRITICAL_ONLY_RULES: frozenset[str] = frozenset({"missing_second_check", "same_person"})
 
-# On a critical step, any one of these findings makes the step Critical.
-CRITICAL_ON_CRITICAL_STEP: frozenset[str] = frozenset(
-    {"missing_second_check", "same_person", "out_of_range"}
-)
+# On a critical step, any one of these findings makes the step Critical:
+# the critical-only rules plus out_of_range.
+CRITICAL_ON_CRITICAL_STEP: frozenset[str] = CRITICAL_ONLY_RULES | {"out_of_range"}
 
 
 class ExpectedFinding(_CsvRow):
@@ -162,7 +162,7 @@ def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> No
     rules = [d.rule_id for d in defects]
     rule_set = set(rules)
     problems = []
-    if repeated := sorted({r for r in rules if rules.count(r) > 1}):
+    if repeated := sorted(r for r, n in Counter(rules).items() if n > 1):
         problems.append(f"rules planted more than once {repeated}")
     if "missing_step" in rule_set and len(rule_set) > 1:
         problems.append("missing_step leaves no row for other findings")
@@ -191,7 +191,7 @@ def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> No
         )
 
 
-def _step_severity(defects: list[PlantedDefect]) -> str:
+def _step_severity(defects: list[PlantedDefect]) -> Severity:
     """The agreed per-step severity policy."""
     if len(defects) >= 2:
         return CRITICAL
