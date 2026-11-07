@@ -12,7 +12,10 @@ from pharma_batch_record_checker.expected_findings import (
     NEEDS_REVIEW,
     RULE_IDS,
     ExpectedFinding,
+    PlantedDefect,
+    expected_findings,
 )
+from pharma_batch_record_checker.masters import SYN500, build_master
 
 # --- Slice 1: row model and constants ---------------------------------------
 
@@ -75,3 +78,100 @@ def test_expected_finding_to_csv_row():
         "severity": "Needs Review",
     }
     assert tuple(finding().to_csv_row()) == EXPECTED_FINDINGS_HEADER
+
+
+# --- Slice 2: severity policy -----------------------------------------------
+
+MASTER = {step.step_id: step for step in build_master(SYN500)}
+CRIT = MASTER["S-COMP-01"]  # critical step
+PLAIN = MASTER["S-GRAN-02"]  # non-critical step
+PLAIN2 = MASTER["S-GRAN-03"]  # another non-critical step
+
+
+def plant(*items):
+    """PlantedDefects from (step, rule_id) or (batch_id, step, rule_id) tuples."""
+    out = []
+    for item in items:
+        batch_id, step, rule_id = item if len(item) == 3 else ("T26-0001", *item)
+        out.append(PlantedDefect.on(batch_id, step, rule_id))
+    return out
+
+
+def rows(findings):
+    """Findings as (batch_id, step_id, rule_id, severity) tuples."""
+    return [(f.batch_id, f.step_id, f.rule_id, f.severity) for f in findings]
+
+
+def test_planted_defect_takes_step_id_and_critical_from_master():
+    """step_id and the critical flag come from the master step, not by hand."""
+    defect = PlantedDefect.on("T26-0001", CRIT, "same_person")
+    assert (defect.batch_id, defect.step_id, defect.critical, defect.rule_id) == (
+        "T26-0001",
+        "S-COMP-01",
+        True,
+        "same_person",
+    )
+
+
+def test_single_finding_on_non_critical_step_needs_review():
+    """One finding on an ordinary step is Needs Review."""
+    assert rows(expected_findings(plant((PLAIN, "unit_mismatch")))) == [
+        ("T26-0001", "S-GRAN-02", "unit_mismatch", NEEDS_REVIEW)
+    ]
+
+
+@pytest.mark.parametrize("rule_id", ["missing_second_check", "same_person"])
+def test_second_check_rules_on_critical_step_are_critical(rule_id):
+    """A missing or same-person second check on a critical step is Critical."""
+    assert rows(expected_findings(plant((CRIT, rule_id))))[0][3] == CRITICAL
+
+
+def test_out_of_range_on_critical_step_is_critical():
+    """A critical step out of range is Critical."""
+    assert rows(expected_findings(plant((CRIT, "out_of_range"))))[0][3] == CRITICAL
+
+
+def test_out_of_range_on_non_critical_step_needs_review():
+    """An ordinary step out of range (alone) is Needs Review."""
+    assert rows(expected_findings(plant((PLAIN, "out_of_range"))))[0][3] == NEEDS_REVIEW
+
+
+def test_single_non_policy_finding_on_critical_step_needs_review():
+    """Only the listed rules make a critical step Critical on their own."""
+    findings = expected_findings(plant((CRIT, "missing_performer")))
+    assert rows(findings)[0][3] == NEEDS_REVIEW
+
+
+def test_two_findings_on_one_step_are_both_critical():
+    """2+ findings on a step make the step Critical; both rows carry it."""
+    findings = expected_findings(
+        plant((PLAIN, "unit_mismatch"), (PLAIN, "missing_performer"))
+    )
+    assert rows(findings) == [
+        ("T26-0001", "S-GRAN-02", "unit_mismatch", CRITICAL),
+        ("T26-0001", "S-GRAN-02", "missing_performer", CRITICAL),
+    ]
+
+
+def test_findings_on_other_steps_and_batches_are_independent():
+    """Severity is per (batch, step): other steps and batches don't count."""
+    findings = expected_findings(
+        plant(
+            (PLAIN, "unit_mismatch"),
+            (PLAIN2, "missing_performer"),
+            ("T26-0002", PLAIN, "missing_reading"),
+        )
+    )
+    assert [f.severity for f in findings] == [NEEDS_REVIEW] * 3
+
+
+def test_output_keeps_planted_order():
+    """Findings come out in the order they were planted."""
+    findings = expected_findings(
+        plant(
+            (PLAIN2, "missing_performer"),
+            (CRIT, "same_person"),
+            (PLAIN, "unit_mismatch"),
+        )
+    )
+    assert [f.step_id for f in findings] == ["S-GRAN-03", "S-COMP-01", "S-GRAN-02"]
