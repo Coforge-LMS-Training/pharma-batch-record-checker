@@ -10,8 +10,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from pharma_batch_record_checker.csv_io import Destination, _write_csv
-from pharma_batch_record_checker.schema import MasterRow, Text, _check_header, _CsvRow
+from pharma_batch_record_checker.csv_io import Destination, write_csv
+from pharma_batch_record_checker.schema import CsvRow, MasterRow, Text, check_header
 
 EXPECTED_FINDINGS_HEADER: tuple[str, ...] = (
     "batch_id",
@@ -46,7 +46,7 @@ CRITICAL_ONLY_RULES: frozenset[str] = frozenset({"missing_second_check", "same_p
 CRITICAL_ON_CRITICAL_STEP: frozenset[str] = CRITICAL_ONLY_RULES | {"out_of_range"}
 
 
-class ExpectedFinding(_CsvRow):
+class ExpectedFinding(CsvRow):
     """One row of expected_findings.csv: a finding a planted defect must cause."""
 
     batch_id: Text
@@ -55,7 +55,7 @@ class ExpectedFinding(_CsvRow):
     severity: Severity
 
 
-_check_header(ExpectedFinding, EXPECTED_FINDINGS_HEADER)
+check_header(ExpectedFinding, EXPECTED_FINDINGS_HEADER)
 
 
 @dataclass(frozen=True)
@@ -204,7 +204,7 @@ def write_expected_findings(
     findings: Iterable[ExpectedFinding], dest: Destination
 ) -> None:
     """Write expected_findings.csv: exact header, CRLF, atomic (as other CSVs)."""
-    _write_csv(EXPECTED_FINDINGS_HEADER, findings, dest)
+    write_csv(EXPECTED_FINDINGS_HEADER, findings, dest)
 
 
 class DefectLog:

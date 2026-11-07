@@ -27,8 +27,8 @@ from pharma_batch_record_checker.schema import (
     BATCH_HEADER,
     MASTER_HEADER,
     BatchRow,
+    CsvRow,
     MasterRow,
-    _CsvRow,
 )
 
 # A destination is either a filesystem path (str or path-like) or a text
@@ -42,7 +42,7 @@ def write_master_csv(rows: Iterable[MasterRow], dest: Destination) -> None:
     An open file must be opened with newline="" (as the csv module requires),
     otherwise the platform may rewrite the CRLF line endings.
     """
-    _write_csv(MASTER_HEADER, rows, dest)
+    write_csv(MASTER_HEADER, rows, dest)
 
 
 def write_batch_csv(rows: Iterable[BatchRow], dest: Destination) -> None:
@@ -51,15 +51,20 @@ def write_batch_csv(rows: Iterable[BatchRow], dest: Destination) -> None:
     An open file must be opened with newline="" (as the csv module requires),
     otherwise the platform may rewrite the CRLF line endings.
     """
-    _write_csv(BATCH_HEADER, rows, dest)
+    write_csv(BATCH_HEADER, rows, dest)
 
 
-def _write_csv(
+def write_csv(
     header: tuple[str, ...],
-    rows: Iterable[_CsvRow],
+    rows: Iterable[CsvRow],
     dest: Destination,
 ) -> None:
-    """Write to a path atomically, or straight into an already-open stream."""
+    """Write a header and CsvRow rows in the contract CSV format.
+
+    Public contract API, used by write_master_csv, write_batch_csv and other
+    CSV files built on CsvRow. Writes to a path atomically, or straight into
+    an already-open stream.
+    """
     if isinstance(dest, (str, os.PathLike)):
         _write_path_atomically(header, rows, Path(dest))
     else:
@@ -68,7 +73,7 @@ def _write_csv(
 
 def _write_path_atomically(
     header: tuple[str, ...],
-    rows: Iterable[_CsvRow],
+    rows: Iterable[CsvRow],
     path: Path,
 ) -> None:
     """Write to a temp file beside path, then rename it over path in one step.
@@ -121,7 +126,7 @@ def _current_umask() -> int:
 
 def _write_rows(
     header: tuple[str, ...],
-    rows: Iterable[_CsvRow],
+    rows: Iterable[CsvRow],
     f: TextIO,
 ) -> None:
     """Emit the header and each row's CSV cells through a csv.DictWriter."""
