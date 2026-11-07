@@ -274,5 +274,11 @@ def check_header(model: type[CsvRow], header: tuple[str, ...]) -> None:
         )
 
 
+# Deprecated aliases for code written before the public rename (#86), e.g.
+# records.py (PHA-59). Use CsvRow / check_header; remove these once no caller
+# imports the old names (tests/test_schema.py pins them until then).
+_CsvRow = CsvRow
+_check_header = check_header
+
 check_header(MasterRow, MASTER_HEADER)
 check_header(BatchRow, BATCH_HEADER)

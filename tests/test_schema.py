@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+import pharma_batch_record_checker.schema as schema_module
 from pharma_batch_record_checker.schema import (
     BATCH_HEADER,
     MASTER_HEADER,
@@ -538,3 +539,13 @@ def test_csv_row_and_check_header_are_public_contract():
     assert TwoColumns(a="x", b="y").to_csv_row() == {"a": "x", "b": "y"}
     with pytest.raises(RuntimeError):
         check_header(TwoColumns, ("b", "a"))
+
+
+def test_deprecated_private_aliases_still_work():
+    """Code written before the public rename (e.g. records.py) keeps working.
+
+    _CsvRow and _check_header are deprecated aliases of the public names; remove
+    them only after every caller has moved to CsvRow / check_header.
+    """
+    assert schema_module._CsvRow is CsvRow
+    assert schema_module._check_header is check_header

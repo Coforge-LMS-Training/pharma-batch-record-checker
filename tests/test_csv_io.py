@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+import pharma_batch_record_checker.csv_io as csv_io_module
 from pharma_batch_record_checker.csv_io import (
     write_batch_csv,
     write_csv,
@@ -258,3 +259,8 @@ def test_write_csv_is_public_contract(tmp_path):
     path = tmp_path / "rows.csv"
     write_csv(BATCH_HEADER, [batch_row()], path)
     assert path.read_bytes().split(b"\r\n")[0].decode() == ",".join(BATCH_HEADER)
+
+
+def test_deprecated_write_csv_alias():
+    """_write_csv stays a deprecated alias of the public write_csv for old callers."""
+    assert csv_io_module._write_csv is write_csv
