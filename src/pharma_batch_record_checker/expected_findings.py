@@ -121,6 +121,7 @@ def expected_findings(planted: Iterable[PlantedDefect]) -> list[ExpectedFinding]
     (see `_check_step`), so the file never expects a finding that can't occur.
     """
     planted = list(planted)
+    _check_one_master_per_batch(planted)
     by_step: dict[tuple[str, str], list[PlantedDefect]] = {}
     for defect in planted:
         by_step.setdefault((defect.batch_id, defect.step_id), []).append(defect)
@@ -138,6 +139,24 @@ def expected_findings(planted: Iterable[PlantedDefect]) -> list[ExpectedFinding]
     ]
 
 
+def _check_one_master_per_batch(planted: list[PlantedDefect]) -> None:
+    """A batch executes one master, so all its defects share one master key.
+
+    This also guarantees each (batch, step) group is a single master step,
+    with a single critical flag.
+    """
+    masters: dict[str, set[str]] = {}
+    for d in planted:
+        masters.setdefault(d.batch_id, set()).add(
+            f"{d.master_record_id} v{d.master_version}"
+        )
+    for batch_id, keys in masters.items():
+        if len(keys) > 1:
+            raise ValueError(
+                f"batch {batch_id} has defects from different masters {sorted(keys)}"
+            )
+
+
 def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> None:
     """Refuse defects on one step that could not all produce their findings."""
     rules = [d.rule_id for d in defects]
@@ -151,6 +170,11 @@ def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> No
         problems.append(
             "out_of_range can't fire when the reading is missing or the unit "
             "mismatches (the range check is skipped)"
+        )
+    if {"missing_performer", "same_person"} <= rule_set:
+        problems.append(
+            "with no performer, same_person can't fire (the verifier can't "
+            "equal a blank performer)"
         )
     if "missing_second_check" in rule_set and rule_set & {
         "same_person",

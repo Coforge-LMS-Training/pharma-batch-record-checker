@@ -24,7 +24,7 @@ from pharma_batch_record_checker.expected_findings import (
     expected_findings,
     write_expected_findings,
 )
-from pharma_batch_record_checker.masters import SYN500, build_master
+from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
 
 # --- Slice 1: row model and constants ---------------------------------------
 
@@ -399,3 +399,36 @@ def test_planted_defect_records_master_key():
     """The master's id and version are recorded with each defect."""
     defect = PlantedDefect.on("T26-0001", PLAIN, "unit_mismatch")
     assert (defect.master_record_id, defect.master_version) == ("MBR-SYN500", "3")
+
+
+# --- Review fix B: combinations and masters ---------------------------------
+
+PLC_MASTER = {step.step_id: step for step in build_master(PLC250)}
+
+
+def test_rejects_missing_performer_with_same_person():
+    """With no performer, the verifier can't be the same person as the performer."""
+    with pytest.raises(ValueError, match=r"missing_performer.*same_person"):
+        expected_findings(plant((CRIT, "missing_performer"), (CRIT, "same_person")))
+
+
+def test_rejects_batch_recorded_against_two_masters():
+    """A batch executes one master; defects from two masters can't share a batch."""
+    planted = [
+        PlantedDefect.on("T26-0001", PLAIN, "unit_mismatch"),
+        PlantedDefect.on("T26-0001", PLC_MASTER["S-BLEND-01"], "unit_mismatch"),
+    ]
+    with pytest.raises(ValueError, match=r"T26-0001.*MBR-PLC250.*MBR-SYN500"):
+        expected_findings(planted)
+
+
+def test_allows_same_step_id_in_different_batches_of_different_masters():
+    """The same step_id in two masters' batches is two separate steps."""
+    planted = [
+        PlantedDefect.on("B26-0001", SIGN_OFF, "missing_performer"),
+        PlantedDefect.on("P26-0001", PLC_MASTER["S-PACK-01"], "missing_performer"),
+    ]
+    assert [(f.batch_id, f.severity) for f in expected_findings(planted)] == [
+        ("B26-0001", NEEDS_REVIEW),
+        ("P26-0001", NEEDS_REVIEW),
+    ]
