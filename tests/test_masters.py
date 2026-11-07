@@ -4,6 +4,8 @@ All data is synthetic. The engine tests use a tiny made-up process and product
 that are not part of the approved masters.
 """
 
+import csv
+import dataclasses
 from decimal import Decimal
 
 import pytest
@@ -14,7 +16,10 @@ from pharma_batch_record_checker.masters import (
     ProductConfig,
     StepTemplate,
     build_master,
+    build_masters,
+    write_masters,
 )
+from pharma_batch_record_checker.schema import MASTER_HEADER
 
 # --- Slice 1: template engine -----------------------------------------------
 
@@ -293,3 +298,54 @@ def test_plc250_sign_off_step():
 def test_plc250_excipient_is_lactose():
     """The capsule's excipient dispensing phase names lactose."""
     assert row_by_step(build_master(PLC250), "S-DISP-02").phase == "Weigh lactose"
+
+
+# --- Slice 4: combined build and write --------------------------------------
+
+
+def test_build_masters_order_and_count():
+    """26 rows: the 16 tablet steps first, then the 10 capsule steps."""
+    ids = [r.master_record_id for r in build_masters()]
+    assert ids == ["MBR-SYN500"] * 16 + ["MBR-PLC250"] * 10
+
+
+def test_build_masters_is_deterministic():
+    """Building twice gives identical masters (no randomness)."""
+    assert build_masters() == build_masters()
+
+
+def test_masters_cover_required_features():
+    """The output includes sign-off steps, min-only and max-only limits, and Y and N."""
+    rows = build_masters()
+    assert any(r.parameter is None for r in rows)
+    assert any(r.min_value is not None and r.max_value is None for r in rows)
+    assert any(r.min_value is None and r.max_value is not None for r in rows)
+    assert {r.critical for r in rows} == {True, False}
+
+
+def test_write_masters_round_trip(tmp_path):
+    """The written file has the exact header, 26 rows and CRLF line endings."""
+    path = tmp_path / "master_record.csv"
+    write_masters(path)
+    lines = path.read_bytes().decode("utf-8").split("\r\n")
+    assert lines[0] == ",".join(MASTER_HEADER)
+    assert lines[-1] == ""  # file ends with CRLF
+    assert len(lines) - 2 == 26
+    with path.open(newline="", encoding="utf-8") as f:
+        assert list(csv.DictReader(f)) == [r.to_csv_row() for r in build_masters()]
+
+
+def test_new_product_reuses_tablet_process():
+    """A new product can be added as config alone; the generator isn't tied to SYN500."""
+    other = dataclasses.replace(
+        SYN500,
+        master_record_id="MBR-TST250",
+        master_version="1",
+        product_name="Testolin 250 mg film-coated tablets",
+        batch_size="150000",
+        excipient="mannitol",
+    )
+    rows = build_master(other)
+    assert len(rows) == 16
+    assert {r.master_record_id for r in rows} == {"MBR-TST250"}
+    assert row_by_step(rows, "S-DISP-02").phase == "Weigh mannitol"

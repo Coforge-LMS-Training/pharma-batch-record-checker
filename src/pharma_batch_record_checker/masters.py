@@ -14,6 +14,7 @@ All data is synthetic.
 
 from dataclasses import dataclass, field
 
+from pharma_batch_record_checker.csv_io import Destination, write_master_csv
 from pharma_batch_record_checker.schema import MasterRow
 
 
@@ -207,3 +208,19 @@ PLC250 = ProductConfig(
         "S-PACK-02": ("30", "30"),  # exact count (inclusive limits)
     },
 )
+
+# The approved masters, in the order they are written.
+APPROVED_PRODUCTS: tuple[ProductConfig, ...] = (SYN500, PLC250)
+
+
+def build_masters() -> list[MasterRow]:
+    """All approved master rows: MBR-SYN500 v3 (16 steps), then MBR-PLC250 v1 (10)."""
+    return [row for product in APPROVED_PRODUCTS for row in build_master(product)]
+
+
+def write_masters(dest: Destination) -> None:
+    """Write the approved masters to master_record.csv format at dest.
+
+    Uses the shared PHA-33 writer: exact client header, CRLF, atomic write.
+    """
+    write_master_csv(build_masters(), dest)
