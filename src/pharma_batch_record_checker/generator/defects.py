@@ -14,18 +14,18 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pharma_batch_record_checker.batches import (
+from pharma_batch_record_checker.generator.batches import (
     VERIFIERS,
     generate_clean_batch,
     limit_quantum,
     repeated,
 )
-from pharma_batch_record_checker.expected_findings import (
+from pharma_batch_record_checker.generator.expected_findings import (
     DefectLog,
     ExpectedFinding,
     RuleId,
 )
-from pharma_batch_record_checker.masters import (
+from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
     ProductConfig,

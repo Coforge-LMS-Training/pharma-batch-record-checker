@@ -11,19 +11,22 @@ from decimal import Decimal
 import pytest
 from rule_oracle import rule_violations
 
-from pharma_batch_record_checker.batches import VERIFIERS, generate_clean_batch
 from pharma_batch_record_checker.csv_io import write_batch_csv
-from pharma_batch_record_checker.defects import (
+from pharma_batch_record_checker.generator.batches import (
+    VERIFIERS,
+    generate_clean_batch,
+)
+from pharma_batch_record_checker.generator.defects import (
     INSTRUCTION_COMMENTS,
     Defect,
     plant_defects,
 )
-from pharma_batch_record_checker.expected_findings import (
+from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
     NEEDS_REVIEW,
     DefectLog,
 )
-from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
+from pharma_batch_record_checker.generator.masters import PLC250, SYN500, build_master
 from pharma_batch_record_checker.schema import BatchRow
 
 START = datetime(2026, 10, 13, 7, 0)

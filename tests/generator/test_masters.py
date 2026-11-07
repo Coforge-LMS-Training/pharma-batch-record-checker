@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from pharma_batch_record_checker.masters import (
+from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
     ProductConfig,

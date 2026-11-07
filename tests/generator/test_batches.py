@@ -6,13 +6,13 @@ from decimal import Decimal
 
 import pytest
 
-from pharma_batch_record_checker.batches import (
+from pharma_batch_record_checker.generator.batches import (
     BENIGN_COMMENTS,
     generate_clean_batch,
     limit_quantum,
     repeated,
 )
-from pharma_batch_record_checker.masters import (
+from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
     ProductConfig,
