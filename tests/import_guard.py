@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 PROJECT = "pharma_batch_record_checker"
-SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
+SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 
 
 def module_imports(src_root: Path, module_name: str) -> set[str]:

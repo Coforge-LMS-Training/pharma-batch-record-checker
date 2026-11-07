@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from rule_oracle import rule_violations
 
 from pharma_batch_record_checker.csv_io import write_batch_csv
 from pharma_batch_record_checker.generator.batches import (
@@ -28,6 +27,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
 )
 from pharma_batch_record_checker.generator.masters import PLC250, SYN500, build_master
 from pharma_batch_record_checker.schema import BatchRow
+from tests.generator.rule_oracle import rule_violations
 
 START = datetime(2026, 10, 13, 7, 0)
 BATCH_ID = "B26-9001"

@@ -8,8 +8,6 @@ import dataclasses
 from collections import Counter
 
 import pytest
-from import_guard import disallowed_imports
-from rule_oracle import rule_violations
 
 import pharma_batch_record_checker.generator.defects as defects_module
 from pharma_batch_record_checker.generator.defects import (
@@ -23,6 +21,8 @@ from pharma_batch_record_checker.generator.expected_findings import (
     RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import PLC250, SYN500
+from tests.generator.rule_oracle import rule_violations
+from tests.import_guard import disallowed_imports
 
 DATASET = build_dataset(seed=0)
 

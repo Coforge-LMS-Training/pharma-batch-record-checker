@@ -1,6 +1,6 @@
 """Tests for the shared import guard used to keep generator code engine-free."""
 
-from import_guard import disallowed_imports, module_imports
+from tests.import_guard import disallowed_imports, module_imports
 
 PKG = "pharma_batch_record_checker"
 
