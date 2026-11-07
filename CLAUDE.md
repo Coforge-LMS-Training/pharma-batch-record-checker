@@ -16,6 +16,7 @@ Batch Record Review Checker (Pharma): checks synthetic batch records against the
 - Timestamps are `YYYY-MM-DDTHH:MM` (minute precision, no timezone). Keep raw values as written (a blank reading is not 0).
 - Files are UTF-8 with no BOM and CRLF line endings, matching the client samples in `sample/` (gitignored, synthetic).
 - The source of truth for this contract is `schema.py` (`MasterRow`, `BatchRow`, headers, `TIMESTAMP_FORMAT`; field order is checked against the headers at import by `_check_header`) together with `csv_io.py` (`write_master_csv`, `write_batch_csv`). Use these instead of writing CSVs by hand. Non-canonical input is rejected, not normalized: numbers must be plain ASCII notation, and text can't be whitespace-only.
+- The approved masters (MBR-SYN500 v3, 16 steps; MBR-PLC250 v1, 10 steps) come from `masters.py`: process templates (`TABLET_PROCESS`, `CAPSULE_PROCESS`) plus one `ProductConfig` per product. Use `build_masters()` / `write_masters(dest)`. To add a product, add a `ProductConfig`; don't read `sample/` from code.
 
 ## Rules (`rule_version` 1.0.0)
 - `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`
