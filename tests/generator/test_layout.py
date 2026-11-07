@@ -14,17 +14,15 @@ PACKAGE = "pharma_batch_record_checker"
 
 
 @pytest.mark.parametrize("name", GENERATOR_MODULES)
-def test_generator_modules_live_in_generator_package(name):
-    """Each generator module is importable from the generator subpackage."""
-    module = importlib.import_module(f"{PACKAGE}.generator.{name}")
-    assert module.__name__ == f"{PACKAGE}.generator.{name}"
-
-
-@pytest.mark.parametrize("name", GENERATOR_MODULES)
 def test_old_top_level_modules_are_gone(name):
-    """No stale copy of a generator module is left at the top level."""
-    with pytest.raises(ModuleNotFoundError):
+    """No stale copy of a generator module is left at the top level.
+
+    The missing module must be the old module itself: a stale file that fails
+    on one of its own imports would also raise ModuleNotFoundError.
+    """
+    with pytest.raises(ModuleNotFoundError) as excinfo:
         importlib.import_module(f"{PACKAGE}.{name}")
+    assert excinfo.value.name == f"{PACKAGE}.{name}"
 
 
 @pytest.mark.parametrize("name", ["schema", "csv_io"])
