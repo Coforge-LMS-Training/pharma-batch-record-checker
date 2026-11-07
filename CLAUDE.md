@@ -17,6 +17,7 @@ Batch Record Review Checker (Pharma): checks synthetic batch records against the
 - Files are UTF-8 with no BOM and CRLF line endings, matching the client samples in `sample/` (gitignored, synthetic).
 - The source of truth for this contract is `schema.py` (`MasterRow`, `BatchRow`, headers, `TIMESTAMP_FORMAT`; field order is checked against the headers at import by `_check_header`) together with `csv_io.py` (`write_master_csv`, `write_batch_csv`). Use these instead of writing CSVs by hand. Non-canonical input is rejected, not normalized: numbers must be plain ASCII notation, and text can't be whitespace-only.
 - The approved masters (MBR-SYN500 v3, 16 steps; MBR-PLC250 v1, 10 steps) come from `masters.py`: process templates (`TABLET_PROCESS`, `CAPSULE_PROCESS`) plus one `ProductConfig` per product. Use `build_masters()` / `write_masters(dest)`. To add a product, add a `ProductConfig`; don't read `sample/` from code.
+- Clean executed batches come from `batches.generate_clean_batch(master, batch_id, start, seed)`. The output is reproducible per seed and breaks none of the 8 rules. `tests/test_batches_acceptance.py` has `rule_violations`, a test-only reference for the 8 rules that the generator tests use.
 
 ## Rules (`rule_version` 1.0.0)
 - `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`
