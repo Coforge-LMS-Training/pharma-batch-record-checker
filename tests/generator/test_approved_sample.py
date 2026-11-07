@@ -6,15 +6,24 @@ sample/ is never read here.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 
-from pharma_batch_record_checker.generator.approved_sample import build_approved_sample
+from pharma_batch_record_checker.generator.approved_sample import (
+    BATCH_FILE,
+    EXPECTED_FILE,
+    MASTER_FILE,
+    build_approved_sample,
+    write_approved_sample,
+)
 from pharma_batch_record_checker.generator.defects import INSTRUCTION_COMMENTS
 from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
+    EXPECTED_FINDINGS_HEADER,
     NEEDS_REVIEW,
 )
+from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
 from tests.generator.rule_oracle import rule_violations
 
 SAMPLE = build_approved_sample()
@@ -138,3 +147,28 @@ def test_fixtures_are_synthetic():
         "Synthetol 500 mg film-coated tablets",
         "Placeprol 250 mg hard capsules",
     }
+
+
+# --- Committed fixture files -------------------------------------------------
+
+FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "approved_sample"
+FIXTURE_HEADERS = {
+    MASTER_FILE: ",".join(MASTER_HEADER),
+    BATCH_FILE: ",".join(BATCH_HEADER),
+    EXPECTED_FILE: ",".join(EXPECTED_FINDINGS_HEADER),
+}
+
+
+@pytest.mark.parametrize(("name", "header"), FIXTURE_HEADERS.items())
+def test_fixture_files_have_exact_headers(name, header):
+    """Each committed file starts with its exact header and uses CRLF only."""
+    data = (FIXTURE_DIR / name).read_bytes()
+    assert data.split(b"\r\n")[0].decode("utf-8") == header
+    assert data.count(b"\n") == data.count(b"\r\n")
+
+
+@pytest.mark.parametrize("name", list(FIXTURE_HEADERS))
+def test_committed_fixtures_match_generator(name, tmp_path):
+    """The committed files are exactly what the generator writes (no drift)."""
+    write_approved_sample(tmp_path)
+    assert (FIXTURE_DIR / name).read_bytes() == (tmp_path / name).read_bytes()

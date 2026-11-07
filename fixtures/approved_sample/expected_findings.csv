@@ -1,0 +1,15 @@
+batch_id,step_id,rule_id,severity
+B26-0413,S-DISP-01,missing_second_check,Critical
+B26-0413,S-DISP-02,missing_performer,Needs Review
+B26-0413,S-GRAN-03,missing_reading,Needs Review
+B26-0413,S-GRAN-04,unit_mismatch,Needs Review
+B26-0413,S-BLEND-01,verifier_before_performer,Needs Review
+B26-0413,S-COMP-01,out_of_range,Critical
+B26-0413,S-COMP-03,unit_mismatch,Needs Review
+B26-0413,S-COAT-02,out_of_range,Critical
+B26-0413,S-COAT-02,same_person,Critical
+B26-0413,S-PACK-02,missing_step,Needs Review
+P26-0202,S-BLEND-01,out_of_range,Needs Review
+P26-0202,S-ENC-02,same_person,Critical
+P26-0202,S-ENC-03,out_of_range,Needs Review
+P26-0202,S-PACK-02,out_of_range,Critical
