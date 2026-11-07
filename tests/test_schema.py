@@ -500,3 +500,21 @@ def test_check_header_raises_on_mismatch():
     """A model whose field order differs from its header is caught immediately."""
     with pytest.raises(RuntimeError):
         _check_header(MasterRow, tuple(reversed(MASTER_HEADER)))
+
+
+# --- Review 3 fix: timestamp input types ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(b"2026-10-12T07:00:59", id="bytes_with_seconds"),
+        pytest.param(b"2026-10-12T07:00", id="bytes"),
+        pytest.param(1760252400, id="unix_int"),
+        pytest.param(1760252400.0, id="unix_float"),
+    ],
+)
+def test_batch_timestamp_rejects_non_text_non_datetime(raw):
+    """Only text or a datetime is accepted; other types would skip the minute check."""
+    with pytest.raises(ValidationError):
+        BatchRow.model_validate(batch_data(performed_at=raw))

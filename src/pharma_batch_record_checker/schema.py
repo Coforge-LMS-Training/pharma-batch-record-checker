@@ -5,7 +5,7 @@ fields are declared in exactly the same order as the headers.
 """
 
 import re
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -68,13 +68,15 @@ def _canonical_timestamp(value: Any) -> Any:
     """Allow only blank, an exact YYYY-MM-DDTHH:MM string, or a naive datetime
     with zero seconds, so a timestamp is written back exactly as it was given.
 
-    A bare date is rejected rather than turned into an invented midnight time.
+    Any other type (bytes, numbers, a bare date) is rejected rather than
+    coerced: Pydantic would otherwise turn it into a datetime without this
+    check, silently dropping seconds or inventing a midnight time.
     """
     value = _blank_to_none(value)
     non_canonical = (
-        (isinstance(value, str) and not _TIMESTAMP_RE.fullmatch(value))
+        not isinstance(value, (str, datetime, type(None)))
+        or (isinstance(value, str) and not _TIMESTAMP_RE.fullmatch(value))
         or (isinstance(value, datetime) and (value.second or value.microsecond))
-        or (isinstance(value, date) and not isinstance(value, datetime))
     )
     if non_canonical:
         raise ValueError("timestamp must be YYYY-MM-DDTHH:MM (minute precision)")
