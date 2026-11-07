@@ -349,3 +349,28 @@ def test_new_product_reuses_tablet_process():
     assert len(rows) == 16
     assert {r.master_record_id for r in rows} == {"MBR-TST250"}
     assert row_by_step(rows, "S-DISP-02").phase == "Weigh mannitol"
+
+
+# --- Review fix A: read-only limits -----------------------------------------
+
+
+def test_approved_limits_are_read_only():
+    """Nobody can change the approved limits in place."""
+    with pytest.raises(TypeError):
+        SYN500.limits["S-COMP-01"] = ("0", "9999")
+
+
+def test_config_copies_limits_it_is_given():
+    """Changing the dict passed in afterwards doesn't change the config."""
+    limits = {"S-DISP-01": ("9.90", "10.10"), "S-MIX-01": ("", "3.0")}
+    config = tiny_product(limits=limits)
+    limits["S-DISP-01"] = ("0", "1")
+    assert config.limits["S-DISP-01"] == ("9.90", "10.10")
+
+
+def test_replace_copy_does_not_share_limits():
+    """A dataclasses.replace copy has its own read-only limits."""
+    copy = dataclasses.replace(SYN500, master_version="4")
+    with pytest.raises(TypeError):
+        copy.limits["S-COMP-01"] = ("0", "9999")
+    assert SYN500.limits["S-COMP-01"] == ("640", "680")

@@ -12,7 +12,9 @@ There is no randomness, so the same config always gives the same master.
 All data is synthetic.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from pharma_batch_record_checker.csv_io import Destination, write_master_csv
 from pharma_batch_record_checker.schema import MasterRow
@@ -40,7 +42,9 @@ class ProductConfig:
     """A product's master: identity, batch size, process and per-step limits.
 
     `limits` maps each measured step_id to (min_value, max_value) as text,
-    exactly as it should be written. "" means no limit on that side.
+    exactly as it should be written. "" means no limit on that side. The
+    config keeps its own read-only copy, so approved limits can't be changed
+    in place, and copies made with dataclasses.replace don't share it.
     """
 
     master_record_id: str
@@ -50,7 +54,11 @@ class ProductConfig:
     batch_size_unit: str
     excipient: str
     process: tuple[StepTemplate, ...]
-    limits: dict[str, tuple[str, str]] = field(default_factory=dict)
+    limits: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Freeze limits as a read-only copy of the mapping passed in."""
+        object.__setattr__(self, "limits", MappingProxyType(dict(self.limits)))
 
 
 def build_master(config: ProductConfig) -> list[MasterRow]:
