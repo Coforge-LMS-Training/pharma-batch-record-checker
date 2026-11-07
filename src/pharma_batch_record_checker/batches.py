@@ -22,6 +22,20 @@ VERIFIERS: tuple[str, ...] = ("OP-131", "OP-142", "OP-157")
 STEP_INTERVAL = timedelta(minutes=30)
 VERIFY_DELAY_MINUTES = (5, 20)
 
+# Plain, factual notes. Nothing here asks a reviewer to do anything:
+# instruction-like comments are planted as defects separately (PHA-37).
+SIGN_OFF_COMMENTS: tuple[str, ...] = (
+    "Line clear. No previous product found.",
+    "Area cleaned and status label checked.",
+)
+STEP_COMMENTS: tuple[str, ...] = (
+    "Equipment ID recorded on log sheet.",
+    "Balance calibration check done before use.",
+    "Reading taken as per procedure.",
+)
+BENIGN_COMMENTS: frozenset[str] = frozenset(SIGN_OFF_COMMENTS + STEP_COMMENTS)
+STEP_COMMENT_CHANCE = 0.2
+
 
 def generate_clean_batch(
     master: Sequence[MasterRow],
@@ -133,5 +147,14 @@ def _clean_row(
         performed_at=performed_at,
         verified_by=verified_by,
         verified_at=verified_at,
-        comment=None,
+        comment=_comment(step, rng),
     )
+
+
+def _comment(step: MasterRow, rng: random.Random) -> str | None:
+    """A benign note: always on sign-off steps, sometimes on measured steps."""
+    if step.parameter is None:
+        return rng.choice(SIGN_OFF_COMMENTS)
+    if rng.random() < STEP_COMMENT_CHANCE:
+        return rng.choice(STEP_COMMENTS)
+    return None

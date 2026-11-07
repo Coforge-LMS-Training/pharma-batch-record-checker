@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from pharma_batch_record_checker.batches import generate_clean_batch
+from pharma_batch_record_checker.batches import BENIGN_COMMENTS, generate_clean_batch
 from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
 
 START = datetime(2026, 10, 12, 7, 0)
@@ -211,3 +211,35 @@ def test_timestamps_serialize_to_minutes():
     out = batch[0].to_csv_row()
     assert out["performed_at"] == "2026-10-12T07:00"
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", out["verified_at"])
+
+
+# --- Slice 4: benign comments -----------------------------------------------
+
+
+@PRODUCTS
+@SEEDS
+def test_sign_off_steps_have_benign_comment(product, seed):
+    """A sign-off-only step (e.g. line clearance) always carries a benign note."""
+    master, batch = clean(product, seed)
+    for step, row in zip(master, batch, strict=True):
+        if step.parameter is None:
+            assert row.comment in BENIGN_COMMENTS
+
+
+@PRODUCTS
+@SEEDS
+def test_comments_are_benign_or_blank(product, seed):
+    """Clean batches never contain anything but benign notes or blanks."""
+    _, batch = clean(product, seed)
+    assert all(r.comment is None or r.comment in BENIGN_COMMENTS for r in batch)
+
+
+def test_some_measured_steps_have_comments():
+    """Benign comments also appear on ordinary steps, not only sign-offs."""
+    commented = [
+        r
+        for seed in range(10)
+        for r in clean(SYN500, seed)[1]
+        if r.comment is not None and r.reading is not None
+    ]
+    assert commented
