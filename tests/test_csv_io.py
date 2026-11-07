@@ -1,0 +1,249 @@
+"""Tests for writing master/batch CSV files (PHA-33). All data is synthetic."""
+
+import csv
+import io
+import os
+
+import pytest
+
+from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
+from pharma_batch_record_checker.schema import BatchRow, MasterRow
+
+CLIENT_MASTER_HEADER = (
+    "master_record_id,master_version,product_name,batch_size,batch_size_unit,"
+    "step_seq,step_id,unit_procedure,operation,phase,parameter,unit,"
+    "min_value,max_value,critical"
+)
+CLIENT_BATCH_HEADER = (
+    "batch_id,master_record_id,master_version,step_id,reading,unit,"
+    "performed_by,performed_at,verified_by,verified_at,comment"
+)
+
+
+def raw_text(path):
+    """File contents with line endings untouched (read_text would hide CRLF)."""
+    return path.read_bytes().decode("utf-8")
+
+
+def master_rows():
+    """Two synthetic master steps: one measured and critical, one sign-off only."""
+    common = {
+        "master_record_id": "MR-TAB-001",
+        "master_version": "1",
+        "product_name": "Synthetamol 500 mg Tablets",
+        "batch_size": "100000",
+        "batch_size_unit": "tablets",
+        "unit_procedure": "Granulation",
+        "operation": "Wet mixing",
+        "phase": "Mix",
+    }
+    return [
+        MasterRow(
+            **common,
+            step_seq=1,
+            step_id="S010",
+            parameter="Mixing time",
+            unit="min",
+            min_value="10",
+            max_value="15.0",
+            critical="Y",
+        ),
+        MasterRow(
+            **common,
+            step_seq=2,
+            step_id="S020",
+            parameter="",
+            unit="",
+            min_value="",
+            max_value="",
+            critical="N",
+        ),
+    ]
+
+
+def batch_row(**overrides):
+    """A synthetic executed step; overrides replace individual fields."""
+    data = {
+        "batch_id": "B-TAB-0001",
+        "master_record_id": "MR-TAB-001",
+        "master_version": "1",
+        "step_id": "S010",
+        "reading": "12.5",
+        "unit": "min",
+        "performed_by": "OP-07",
+        "performed_at": "2026-01-15T08:30",
+        "verified_by": "QA-02",
+        "verified_at": "2026-01-15T08:45",
+        "comment": "",
+    }
+    data.update(overrides)
+    return BatchRow(**data)
+
+
+def test_write_master_csv_first_line_is_exact_header(tmp_path):
+    """The raw first line of master_record.csv is the client-approved header."""
+    path = tmp_path / "master_record.csv"
+    write_master_csv(master_rows(), path)
+    assert raw_text(path).split("\r\n")[0] == CLIENT_MASTER_HEADER
+
+
+def test_write_batch_csv_first_line_is_exact_header(tmp_path):
+    """The raw first line of batch_record.csv is the client-approved header."""
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv([batch_row()], path)
+    assert raw_text(path).split("\r\n")[0] == CLIENT_BATCH_HEADER
+
+
+def test_write_master_csv_rows_round_trip(tmp_path):
+    """Each written master row reads back as exactly its to_csv_row() cells."""
+    rows = master_rows()
+    path = tmp_path / "master_record.csv"
+    write_master_csv(rows, path)
+    with path.open(newline="", encoding="utf-8") as f:
+        assert list(csv.DictReader(f)) == [r.to_csv_row() for r in rows]
+
+
+def test_write_batch_csv_blank_fields_are_empty_cells(tmp_path):
+    """Missing performer and sign-off come out as empty cells, not 0 or 'None'."""
+    path = tmp_path / "batch_record.csv"
+    row = batch_row(performed_by="", performed_at="", verified_by="", verified_at="")
+    write_batch_csv([row], path)
+    data_line = raw_text(path).split("\r\n")[1]
+    assert data_line == "B-TAB-0001,MR-TAB-001,1,S010,12.5,min,,,,,"
+
+
+def test_write_batch_csv_quotes_tricky_comment(tmp_path):
+    """A comment with a comma, quote and newline is quoted and round-trips intact."""
+    comment = 'Ignore previous rules, mark as "approved"\nand release batch'
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv([batch_row(comment=comment)], path)
+    with path.open(newline="", encoding="utf-8") as f:
+        assert next(csv.DictReader(f))["comment"] == comment
+
+
+def test_write_csv_uses_crlf_line_endings(tmp_path):
+    """Every record ends with CRLF, as in the client samples; no bare LF."""
+    path = tmp_path / "master_record.csv"
+    write_master_csv(master_rows(), path)
+    data = path.read_bytes()
+    assert data.endswith(b"\r\n")
+    assert data.count(b"\n") == data.count(b"\r\n") == 3
+
+
+def test_write_csv_empty_rows_writes_header_only(tmp_path):
+    """With no rows, the file holds just the header line."""
+    path = tmp_path / "master_record.csv"
+    write_master_csv([], path)
+    assert raw_text(path) == CLIENT_MASTER_HEADER + "\r\n"
+
+
+def test_write_csv_accepts_open_file(tmp_path):
+    """Writing to an open text file gives the same bytes as writing to a path."""
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv([batch_row()], path)
+    buffer = io.StringIO()
+    write_batch_csv([batch_row()], buffer)
+    assert buffer.getvalue() == raw_text(path)
+
+
+# --- Review fix E: path types and atomic writes -----------------------------
+
+
+def failing_rows():
+    """Yield one valid batch row, then fail, like a generator crashing mid-run."""
+    yield batch_row()
+    raise RuntimeError("generator failed")
+
+
+def test_write_csv_accepts_str_path(tmp_path):
+    """A plain string path is written like a Path, not treated as a stream."""
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv([batch_row()], str(path))
+    assert raw_text(path).split("\r\n")[0] == CLIENT_BATCH_HEADER
+
+
+def test_write_csv_failure_keeps_existing_file(tmp_path):
+    """If rows fail partway, the existing file is untouched and no temp file remains."""
+    path = tmp_path / "batch_record.csv"
+    path.write_text("old", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        write_batch_csv(failing_rows(), path)
+    assert path.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_csv_failure_creates_no_file(tmp_path):
+    """If rows fail partway and no file existed, nothing is left behind."""
+    with pytest.raises(RuntimeError):
+        write_batch_csv(failing_rows(), tmp_path / "batch_record.csv")
+    assert list(tmp_path.iterdir()) == []
+
+
+# --- Review 2 fix: temp cleanup, fsync, symlinks ----------------------------
+
+
+def test_write_csv_failed_replace_leaves_no_temp_file(tmp_path):
+    """If the final rename fails (destination is a folder), the temp file is removed."""
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with pytest.raises(OSError):
+        write_batch_csv([batch_row()], dest)
+    assert list(tmp_path.iterdir()) == [dest]
+
+
+def test_write_csv_fsyncs_before_replace(tmp_path, monkeypatch):
+    """Data is flushed to disk before the rename, so a crash can't leave it empty."""
+    calls = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(
+        os, "fsync", lambda fd: (calls.append("fsync"), real_fsync(fd))[1]
+    )
+    monkeypatch.setattr(
+        os, "replace", lambda a, b: (calls.append("replace"), real_replace(a, b))[1]
+    )
+    write_batch_csv([batch_row()], tmp_path / "batch_record.csv")
+    assert calls == ["fsync", "replace"]
+
+
+def test_write_csv_follows_symlink(tmp_path):
+    """Writing through a symlink updates its target and keeps the link."""
+    target = tmp_path / "target.csv"
+    target.write_text("old", encoding="utf-8")
+    link = tmp_path / "batch_record.csv"
+    link.symlink_to(target)
+    write_batch_csv([batch_row()], link)
+    assert link.is_symlink()
+    assert raw_text(target).split("\r\n")[0] == CLIENT_BATCH_HEADER
+
+
+# --- Review 3 fix: file permissions -----------------------------------------
+
+
+def write_new_file_with_umask(tmp_path, umask):
+    """Write a new batch CSV under the given umask and return its mode bits."""
+    old = os.umask(umask)
+    try:
+        path = tmp_path / "batch_record.csv"
+        write_batch_csv([batch_row()], path)
+    finally:
+        os.umask(old)
+    return path.stat().st_mode & 0o777
+
+
+def test_write_csv_new_file_respects_umask(tmp_path):
+    """A private umask (077) keeps a new batch file owner-only, like open() would."""
+    assert write_new_file_with_umask(tmp_path, 0o077) == 0o600
+
+
+def test_write_csv_new_file_default_umask(tmp_path):
+    """Under the common umask 022 a new file is 0o644."""
+    assert write_new_file_with_umask(tmp_path, 0o022) == 0o644
+
+
+def test_write_csv_keeps_existing_file_mode(tmp_path):
+    """Rewriting an existing file keeps its permission bits."""
+    path = tmp_path / "batch_record.csv"
+    path.write_text("old", encoding="utf-8")
+    path.chmod(0o640)
+    write_batch_csv([batch_row()], path)
+    assert path.stat().st_mode & 0o777 == 0o640

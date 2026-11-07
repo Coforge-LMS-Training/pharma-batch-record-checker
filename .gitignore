@@ -221,3 +221,6 @@ __marimo__/
 
 # Claude Code personal notes
 CLAUDE.local.md
+# Client sample CSVs (top-level folder only)
+/sample/
+.DS_Store
