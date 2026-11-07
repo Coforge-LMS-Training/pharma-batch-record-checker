@@ -3,6 +3,9 @@
 Expected findings come only from planted defects, never from a rules engine.
 """
 
+import csv
+import io
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,9 +14,11 @@ from pharma_batch_record_checker.expected_findings import (
     EXPECTED_FINDINGS_HEADER,
     NEEDS_REVIEW,
     RULE_IDS,
+    DefectLog,
     ExpectedFinding,
     PlantedDefect,
     expected_findings,
+    write_expected_findings,
 )
 from pharma_batch_record_checker.masters import SYN500, build_master
 
@@ -239,3 +244,75 @@ def test_error_names_batch_step_and_rules():
                 ("T26-0009", PLAIN, "missing_performer"),
             )
         )
+
+
+# --- Slice 4: DefectLog and writer ------------------------------------------
+
+HEADER_LINE = "batch_id,step_id,rule_id,severity"
+
+
+def sample_log():
+    """A log with 3 planted defects: one step with 2, one critical same_person."""
+    log = DefectLog()
+    log.record("T26-0001", PLAIN, "unit_mismatch")
+    log.record("T26-0001", PLAIN, "missing_performer")
+    log.record("T26-0001", CRIT, "same_person")
+    return log
+
+
+def test_defect_log_records_in_order():
+    """record() keeps what was planted, in order, with flags from the master."""
+    assert sample_log().planted == plant(
+        (PLAIN, "unit_mismatch"), (PLAIN, "missing_performer"), (CRIT, "same_person")
+    )
+
+
+def test_defect_log_findings_match_expected_findings():
+    """findings() is expected_findings() over the recorded defects."""
+    log = sample_log()
+    assert log.findings() == expected_findings(log.planted)
+
+
+def test_write_expected_findings_header_and_rows(tmp_path):
+    """Exact header, one row per finding, CRLF like the other CSVs."""
+    path = tmp_path / "expected_findings.csv"
+    write_expected_findings(sample_log().findings(), path)
+    assert path.read_bytes().decode("utf-8") == (
+        f"{HEADER_LINE}\r\n"
+        "T26-0001,S-GRAN-02,unit_mismatch,Critical\r\n"
+        "T26-0001,S-GRAN-02,missing_performer,Critical\r\n"
+        "T26-0001,S-COMP-01,same_person,Critical\r\n"
+    )
+
+
+def test_write_expected_findings_multiple_findings_per_step(tmp_path):
+    """A step may have more than one expected finding (one row each)."""
+    path = tmp_path / "expected_findings.csv"
+    write_expected_findings(sample_log().findings(), path)
+    with path.open(newline="", encoding="utf-8") as f:
+        steps = [row["step_id"] for row in csv.DictReader(f)]
+    assert steps.count("S-GRAN-02") == 2
+
+
+def test_write_expected_findings_empty_writes_header_only(tmp_path):
+    """No planted defects still gives a file with the header."""
+    path = tmp_path / "expected_findings.csv"
+    write_expected_findings([], path)
+    assert path.read_bytes() == f"{HEADER_LINE}\r\n".encode()
+
+
+def test_write_expected_findings_accepts_open_file(tmp_path):
+    """Writing to an open file gives the same text as writing to a path."""
+    path = tmp_path / "expected_findings.csv"
+    write_expected_findings(sample_log().findings(), path)
+    buffer = io.StringIO()
+    write_expected_findings(sample_log().findings(), buffer)
+    assert buffer.getvalue() == path.read_bytes().decode("utf-8")
+
+
+def test_defect_log_write(tmp_path):
+    """DefectLog.write() writes its findings to expected_findings.csv format."""
+    path = tmp_path / "expected_findings.csv"
+    sample_log().write(path)
+    assert path.read_bytes().decode("utf-8").startswith(f"{HEADER_LINE}\r\n")
+    assert path.read_bytes().count(b"\r\n") == 4

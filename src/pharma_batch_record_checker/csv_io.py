@@ -28,6 +28,7 @@ from pharma_batch_record_checker.schema import (
     MASTER_HEADER,
     BatchRow,
     MasterRow,
+    _CsvRow,
 )
 
 # A destination is either a filesystem path (str or path-like) or a text
@@ -55,7 +56,7 @@ def write_batch_csv(rows: Iterable[BatchRow], dest: Destination) -> None:
 
 def _write_csv(
     header: tuple[str, ...],
-    rows: Iterable[MasterRow] | Iterable[BatchRow],
+    rows: Iterable[_CsvRow],
     dest: Destination,
 ) -> None:
     """Write to a path atomically, or straight into an already-open stream."""
@@ -67,7 +68,7 @@ def _write_csv(
 
 def _write_path_atomically(
     header: tuple[str, ...],
-    rows: Iterable[MasterRow] | Iterable[BatchRow],
+    rows: Iterable[_CsvRow],
     path: Path,
 ) -> None:
     """Write to a temp file beside path, then rename it over path in one step.
@@ -120,7 +121,7 @@ def _current_umask() -> int:
 
 def _write_rows(
     header: tuple[str, ...],
-    rows: Iterable[MasterRow] | Iterable[BatchRow],
+    rows: Iterable[_CsvRow],
     f: TextIO,
 ) -> None:
     """Emit the header and each row's CSV cells through a csv.DictWriter."""

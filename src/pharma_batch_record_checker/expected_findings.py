@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, get_args
 
+from pharma_batch_record_checker.csv_io import Destination, _write_csv
 from pharma_batch_record_checker.schema import MasterRow, Text, _check_header, _CsvRow
 
 EXPECTED_FINDINGS_HEADER: tuple[str, ...] = (
@@ -144,3 +145,39 @@ def _step_severity(defects: list[PlantedDefect]) -> str:
     if any(d.critical and d.rule_id in CRITICAL_ON_CRITICAL_STEP for d in defects):
         return CRITICAL
     return NEEDS_REVIEW
+
+
+def write_expected_findings(
+    findings: Iterable[ExpectedFinding], dest: Destination
+) -> None:
+    """Write expected_findings.csv: exact header, CRLF, atomic (as other CSVs)."""
+    _write_csv(EXPECTED_FINDINGS_HEADER, findings, dest)
+
+
+class DefectLog:
+    """Records defects as they are planted, then produces the expected findings.
+
+    A planter changes a clean batch row and immediately calls
+    `record(batch_id, step, rule_id)` with the master step it changed.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing planted."""
+        self._planted: list[PlantedDefect] = []
+
+    def record(self, batch_id: str, step: MasterRow, rule_id: str) -> None:
+        """Record that `rule_id` was planted on master `step` in `batch_id`."""
+        self._planted.append(PlantedDefect.on(batch_id, step, rule_id))
+
+    @property
+    def planted(self) -> list[PlantedDefect]:
+        """Everything recorded so far, in planting order (a copy)."""
+        return list(self._planted)
+
+    def findings(self) -> list[ExpectedFinding]:
+        """The expected findings for everything planted (see expected_findings)."""
+        return expected_findings(self._planted)
+
+    def write(self, dest: Destination) -> None:
+        """Write the expected findings to `dest` in expected_findings.csv format."""
+        write_expected_findings(self.findings(), dest)
