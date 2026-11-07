@@ -71,6 +71,11 @@ def write_csv(
         _write_rows(header, rows, dest)
 
 
+# Deprecated alias for code written before the public rename (#86). Use
+# write_csv; remove once no caller imports _write_csv (pinned by a test).
+_write_csv = write_csv
+
+
 def _write_path_atomically(
     header: tuple[str, ...],
     rows: Iterable[CsvRow],

@@ -1,21 +1,21 @@
 """Every generator module stays independent of the app (no rules engine, parser, store).
 
-Modules are discovered from the package, so a new generator module (e.g. a
-CLI) is checked automatically without anyone adding it to a list.
+Modules are discovered recursively from the source tree, so a new generator
+module or subpackage (e.g. a CLI) is checked automatically.
 """
-
-import pkgutil
 
 import pytest
 
-import pharma_batch_record_checker.generator as generator_package
-from tests.import_guard import SRC_ROOT, disallowed_imports, module_imports
+from tests.generator import KNOWN_GENERATOR_MODULES
+from tests.import_guard import (
+    SRC_ROOT,
+    disallowed_imports,
+    module_imports,
+    project_modules,
+)
 
 GENERATOR = "pharma_batch_record_checker.generator"
-GENERATOR_MODULES = sorted(
-    f"{GENERATOR}.{info.name}"
-    for info in pkgutil.iter_modules(generator_package.__path__)
-)
+GENERATOR_MODULES = project_modules(SRC_ROOT, GENERATOR)
 ALLOWED_PROJECT = {
     *GENERATOR_MODULES,
     "pharma_batch_record_checker.schema",
@@ -25,10 +25,9 @@ ALLOWED_PROJECT = {
 
 def test_generator_modules_are_discovered():
     """Discovery finds the known modules (guards against an empty parametrize)."""
-    assert {
-        f"{GENERATOR}.{name}"
-        for name in ("masters", "batches", "defects", "expected_findings")
-    } <= set(GENERATOR_MODULES)
+    assert {f"{GENERATOR}.{name}" for name in KNOWN_GENERATOR_MODULES} <= set(
+        GENERATOR_MODULES
+    )
 
 
 @pytest.mark.parametrize("module", GENERATOR_MODULES)
