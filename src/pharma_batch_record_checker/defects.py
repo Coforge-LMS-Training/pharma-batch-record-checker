@@ -6,6 +6,7 @@ Units are exact, case-sensitive strings and are never converted. All data is
 synthetic.
 """
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -66,17 +67,23 @@ def plant_defects(
 ) -> list[BatchRow]:
     """Plant `defects` into a copy of `clean_batch` and record each in `log`.
 
-    Each defect is checked, then recorded, then applied, so the log only ever
-    holds defects that were really planted. Changed rows are re-validated as
-    BatchRows. Rows come back in step order; a missing_step leaves no row.
+    Planting is all-or-nothing. Each defect is first recorded in a private
+    staging log (which refuses a rule that can't apply to its step), then
+    applied to its row. Once every defect is planted, the staged findings
+    are built (which refuses combinations that couldn't all fire), and only
+    then are the defects recorded in `log`. If anything fails, `log` is
+    unchanged. Changed rows are re-validated as BatchRows. Rows come back in
+    step order; a missing_step leaves no row.
 
     `comments` maps step_id to a comment (e.g. from INSTRUCTION_COMMENTS). It
     is allowed only on steps that received a defect here, and only changes
     the comment field, so it never alters the expected findings.
     """
     steps = {step.step_id: step for step in master}
+    batch_id = _check_clean_batch(master, clean_batch)
     rows: dict[str, BatchRow | None] = {row.step_id: row for row in clean_batch}
-    batch_id = _single_batch_id(clean_batch)
+    staged = DefectLog()
+    planted: list[tuple[MasterRow, str]] = []
     for defect in defects:
         step = steps.get(defect.step_id)
         if step is None:
@@ -86,14 +93,42 @@ def plant_defects(
             raise ValueError(
                 f"{defect.step_id}: no row left to plant on (missing_step)"
             )
-        changes = (
-            None if defect.rule_id == "missing_step" else _changes(defect, step, row)
-        )
-        log.record(batch_id, step, defect.rule_id)
-        rows[defect.step_id] = None if changes is None else _rebuild(row, changes)
+        staged.record(batch_id, step, defect.rule_id)  # applicability first
+        if defect.rule_id == "missing_step":
+            rows[defect.step_id] = None
+        else:
+            rows[defect.step_id] = _rebuild(row, _changes(defect, step, row))
+        planted.append((step, defect.rule_id))
     _add_comments(rows, {d.step_id for d in defects}, comments or {})
+    staged.findings()  # refuses combinations that couldn't all fire
+    for step, rule_id in planted:
+        log.record(batch_id, step, rule_id)
     ordered = sorted(master, key=lambda step: step.step_seq)
     return [row for step in ordered if (row := rows.get(step.step_id)) is not None]
+
+
+def _check_clean_batch(
+    master: Sequence[MasterRow], clean_batch: Sequence[BatchRow]
+) -> str:
+    """The clean batch must be one batch of this master, each step once.
+
+    Returns its batch_id.
+    """
+    batch_ids = {row.batch_id for row in clean_batch}
+    if len(batch_ids) != 1:
+        raise ValueError(f"clean_batch must be one batch, got {sorted(batch_ids)}")
+    master_keys = {(s.master_record_id, s.master_version) for s in master}
+    batch_keys = {(r.master_record_id, r.master_version) for r in clean_batch}
+    if batch_keys != master_keys:
+        raise ValueError(
+            f"clean batch executes {sorted(batch_keys)}, not master {sorted(master_keys)}"
+        )
+    step_ids = [row.step_id for row in clean_batch]
+    if duplicates := sorted(i for i, n in Counter(step_ids).items() if n > 1):
+        raise ValueError(f"clean batch repeats steps {duplicates}")
+    if unknown := sorted(set(step_ids) - {s.step_id for s in master}):
+        raise ValueError(f"clean batch has steps not in the master {unknown}")
+    return batch_ids.pop()
 
 
 def _add_comments(
@@ -111,14 +146,6 @@ def _add_comments(
         if row is None:
             raise ValueError(f"{step_id}: the step is missing, so it has no comment")
         rows[step_id] = _rebuild(row, {"comment": comment})
-
-
-def _single_batch_id(clean_batch: Sequence[BatchRow]) -> str:
-    """Defects are planted into one batch at a time."""
-    batch_ids = {row.batch_id for row in clean_batch}
-    if len(batch_ids) != 1:
-        raise ValueError(f"clean_batch must be one batch, got {sorted(batch_ids)}")
-    return batch_ids.pop()
 
 
 def _changes(defect: Defect, step: MasterRow, row: BatchRow) -> dict[str, Any]:

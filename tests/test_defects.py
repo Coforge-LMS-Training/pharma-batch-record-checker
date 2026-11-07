@@ -236,3 +236,70 @@ def test_instruction_comments_are_instruction_like():
         any(word in c.lower() for word in ("mark", "ignore", "skip", "approve"))
         for c in INSTRUCTION_COMMENTS
     )
+
+
+# --- Review fix A: all-or-nothing planting and input checks -----------------
+
+
+def clean_parts(product=SYN500):
+    """A master and a clean batch for it."""
+    master = build_master(product)
+    return master, generate_clean_batch(master, BATCH_ID, START, 0)
+
+
+def test_failed_planting_leaves_log_untouched():
+    """If any defect fails, nothing from the batch is recorded."""
+    master, clean = clean_parts()
+    log = DefectLog()
+    defects = [
+        Defect("S-GRAN-01", "missing_performer"),
+        Defect("S-NOPE-99", "missing_reading"),
+    ]
+    with pytest.raises(ValueError, match="S-NOPE-99"):
+        plant_defects(master, clean, defects, log)
+    assert log.planted == []
+
+
+def test_inconsistent_combination_refused_at_planting():
+    """Defects that can't all fire are refused by plant_defects itself."""
+    master, clean = clean_parts()
+    log = DefectLog()
+    defects = [
+        Defect("S-GRAN-01", "out_of_range"),
+        Defect("S-GRAN-01", "missing_reading"),
+    ]
+    with pytest.raises(ValueError, match="out_of_range"):
+        plant_defects(master, clean, defects, log)
+    assert log.planted == []
+
+
+def test_rejects_clean_batch_of_another_master():
+    """Planting with one master into another master's batch is refused."""
+    master, _ = clean_parts(SYN500)
+    _, plc_clean = clean_parts(PLC250)
+    with pytest.raises(ValueError, match="MBR-PLC250"):
+        plant_defects(
+            master, plc_clean, [Defect("S-BLEND-02", "out_of_range")], DefectLog()
+        )
+
+
+def test_rejects_duplicate_clean_row():
+    """A clean batch with a repeated step is refused, not silently collapsed."""
+    master, clean = clean_parts()
+    with pytest.raises(ValueError, match="S-GRAN-01"):
+        plant_defects(master, [*clean, clean[2]], [], DefectLog())
+
+
+def test_rejects_clean_row_not_in_master():
+    """A clean row for a step the master doesn't have is refused, not dropped."""
+    master, clean = clean_parts()
+    extra = clean[0].model_copy(update={"step_id": "S-XTRA-01"})
+    with pytest.raises(ValueError, match="S-XTRA-01"):
+        plant_defects(master, [*clean, extra], [], DefectLog())
+
+
+def test_applicability_error_comes_first():
+    """The reason a rule can't apply to a step is reported, not a planter detail."""
+    master, clean = clean_parts()
+    with pytest.raises(ValueError, match="no limits"):
+        plant_defects(master, clean, [Defect("S-PACK-01", "out_of_range")], DefectLog())
