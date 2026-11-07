@@ -37,8 +37,8 @@ from pharma_batch_record_checker.schema import (
     BATCH_HEADER,
     MASTER_HEADER,
     BatchRow,
+    CsvRow,
     MasterRow,
-    _CsvRow,
 )
 
 Source = str | os.PathLike[str]
@@ -244,7 +244,7 @@ def _decode(name: str, errors: list[ParseError]) -> str | None:
     return None
 
 
-def _validate[R: _CsvRow](
+def _validate[R: CsvRow](
     name: str,
     line: int,
     cells: dict[str, str],
