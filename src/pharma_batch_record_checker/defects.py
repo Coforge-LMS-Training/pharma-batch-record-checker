@@ -7,13 +7,24 @@ synthetic.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
-from pharma_batch_record_checker.batches import VERIFIERS, _places
-from pharma_batch_record_checker.expected_findings import DefectLog, RuleId
+from pharma_batch_record_checker.batches import VERIFIERS, _places, generate_clean_batch
+from pharma_batch_record_checker.expected_findings import (
+    DefectLog,
+    ExpectedFinding,
+    RuleId,
+)
+from pharma_batch_record_checker.masters import (
+    PLC250,
+    SYN500,
+    ProductConfig,
+    build_master,
+    build_masters,
+)
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 
 # verifier_before_performer: the verification is timed this long before
@@ -173,3 +184,90 @@ def _mismatched_unit(defect: Defect, step: MasterRow) -> str | None:
 def _rebuild(row: BatchRow, changes: dict[str, Any]) -> BatchRow:
     """Apply changes and re-validate, so planted rows meet the CSV contract."""
     return BatchRow.model_validate({**row.model_dump(), **changes})
+
+
+# --- The dataset ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BatchPlan:
+    """One batch in the dataset: a clean batch, optionally with planted defects."""
+
+    product: ProductConfig
+    batch_id: str
+    start: datetime
+    defects: tuple[Defect, ...] = ()
+    comments: Mapping[str, str] = field(default_factory=dict)
+
+
+# Clean batches, then one defect batch per product. Together the defect batches
+# cover all 8 rules, critical and non-critical steps, one-sided limits, blank /
+# wrong-case / different units, two-defect steps, and instruction-like comments
+# on defective steps only.
+BATCH_PLANS: tuple[BatchPlan, ...] = (
+    BatchPlan(SYN500, "B26-0001", datetime(2026, 10, 12, 7, 0)),
+    BatchPlan(PLC250, "P26-0001", datetime(2026, 10, 12, 7, 0)),
+    BatchPlan(
+        SYN500,
+        "B26-0002",
+        datetime(2026, 10, 13, 7, 0),
+        defects=(
+            Defect("S-DISP-02", "missing_performer"),
+            Defect("S-GRAN-01", "out_of_range", side="low"),
+            Defect("S-GRAN-02", "out_of_range"),
+            Defect("S-GRAN-02", "missing_performer"),
+            Defect("S-GRAN-03", "missing_reading"),
+            Defect("S-GRAN-04", "unit_mismatch", unit="degF"),
+            Defect("S-BLEND-01", "verifier_before_performer"),
+            Defect("S-COMP-01", "out_of_range"),
+            Defect("S-COMP-02", "missing_second_check"),
+            Defect("S-COMP-03", "unit_mismatch", unit="blank"),
+            Defect("S-COAT-02", "same_person"),
+            Defect("S-PACK-02", "missing_step"),
+        ),
+        comments={
+            "S-GRAN-02": INSTRUCTION_COMMENTS[0],
+            "S-COMP-01": INSTRUCTION_COMMENTS[1],
+        },
+    ),
+    BatchPlan(
+        PLC250,
+        "P26-0002",
+        datetime(2026, 10, 13, 7, 0),
+        defects=(
+            Defect("S-DISP-01", "verifier_before_performer"),
+            Defect("S-BLEND-01", "unit_mismatch", unit="case"),
+            Defect("S-BLEND-01", "missing_performer"),
+            Defect("S-BLEND-02", "out_of_range"),
+            Defect("S-BLEND-03", "missing_step"),
+            Defect("S-ENC-02", "same_person"),
+            Defect("S-ENC-03", "out_of_range"),
+            Defect("S-PACK-02", "missing_second_check"),
+        ),
+        comments={"S-BLEND-01": INSTRUCTION_COMMENTS[2]},
+    ),
+)
+
+
+@dataclass(frozen=True)
+class Dataset:
+    """Everything a run needs: masters, executed batches, expected findings."""
+
+    masters: list[MasterRow]
+    batches: list[BatchRow]
+    findings: list[ExpectedFinding]
+
+
+def build_dataset(seed: int, plans: Sequence[BatchPlan] = BATCH_PLANS) -> Dataset:
+    """Build the masters, the planned batches and their expected findings.
+
+    Clean readings come from `seed`; the planted defects are fixed by `plans`.
+    Expected findings are recorded while planting, never computed afterwards.
+    """
+    log = DefectLog()
+    batches: list[BatchRow] = []
+    for plan in plans:
+        master = build_master(plan.product)
+        clean = generate_clean_batch(master, plan.batch_id, plan.start, seed)
+        batches += plant_defects(master, clean, plan.defects, log, plan.comments)
+    return Dataset(masters=build_masters(), batches=batches, findings=log.findings())
