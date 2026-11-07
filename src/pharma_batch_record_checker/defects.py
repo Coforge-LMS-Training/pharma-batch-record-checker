@@ -15,7 +15,11 @@ from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pharma_batch_record_checker.batches import VERIFIERS, _places, generate_clean_batch
+from pharma_batch_record_checker.batches import (
+    VERIFIERS,
+    generate_clean_batch,
+    limit_quantum,
+)
 from pharma_batch_record_checker.expected_findings import (
     DefectLog,
     ExpectedFinding,
@@ -180,7 +184,7 @@ def _out_of_range_reading(defect: Defect, step: MasterRow) -> Decimal:
     bound = high if side == "high" else low
     if bound is None:
         raise ValueError(f"{step.step_id}: no {'max' if side == 'high' else 'min'}")
-    quantum = Decimal(1).scaleb(-max(_places(v) for v in (low, high) if v is not None))
+    quantum = limit_quantum(step)
     value = bound + quantum if side == "high" else bound - quantum
     return value.quantize(quantum)
 
