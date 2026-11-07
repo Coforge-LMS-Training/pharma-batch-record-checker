@@ -6,11 +6,13 @@ Units are exact, case-sensitive strings and are never converted. All data is
 synthetic.
 """
 
+import zlib
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pharma_batch_record_checker.batches import VERIFIERS, _places, generate_clean_batch
@@ -226,6 +228,10 @@ class BatchPlan:
     defects: tuple[Defect, ...] = ()
     comments: Mapping[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Keep a read-only copy of comments, so plans can't change in place."""
+        object.__setattr__(self, "comments", MappingProxyType(dict(self.comments)))
+
 
 # Clean batches, then one defect batch per product. Together the defect batches
 # cover all 8 rules, critical and non-critical steps, one-sided limits, blank /
@@ -288,13 +294,32 @@ class Dataset:
 def build_dataset(seed: int, plans: Sequence[BatchPlan] = BATCH_PLANS) -> Dataset:
     """Build the masters, the planned batches and their expected findings.
 
-    Clean readings come from `seed`; the planted defects are fixed by `plans`.
-    Expected findings are recorded while planting, never computed afterwards.
+    Each batch's clean readings come from its own seed, derived from `seed`
+    and its batch_id, so batches of one product differ. The planted defects
+    are fixed by `plans`. The masters are those of the products the plans
+    use. Expected findings are recorded while planting, never computed later.
     """
+    _check_unique_batch_ids(plans)
     log = DefectLog()
     batches: list[BatchRow] = []
     for plan in plans:
         master = build_master(plan.product)
-        clean = generate_clean_batch(master, plan.batch_id, plan.start, seed)
+        batch_seed = _batch_seed(seed, plan.batch_id)
+        clean = generate_clean_batch(master, plan.batch_id, plan.start, batch_seed)
         batches += plant_defects(master, clean, plan.defects, log, plan.comments)
-    return Dataset(masters=build_masters(), batches=batches, findings=log.findings())
+    products = list({id(p.product): p.product for p in plans}.values())
+    return Dataset(
+        masters=build_masters(products), batches=batches, findings=log.findings()
+    )
+
+
+def _batch_seed(seed: int, batch_id: str) -> int:
+    """A stable per-batch seed (crc32 is the same on every run and machine)."""
+    return zlib.crc32(f"{seed}:{batch_id}".encode())
+
+
+def _check_unique_batch_ids(plans: Sequence[BatchPlan]) -> None:
+    """Two plans with one batch_id would merge into a single batch."""
+    ids = [plan.batch_id for plan in plans]
+    if duplicates := sorted(i for i, n in Counter(ids).items() if n > 1):
+        raise ValueError(f"duplicate batch_ids in plans {duplicates}")

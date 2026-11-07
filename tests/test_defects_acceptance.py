@@ -13,12 +13,17 @@ import pytest
 from rule_oracle import rule_violations
 
 import pharma_batch_record_checker.defects as defects_module
-from pharma_batch_record_checker.defects import INSTRUCTION_COMMENTS, build_dataset
+from pharma_batch_record_checker.defects import (
+    BATCH_PLANS,
+    INSTRUCTION_COMMENTS,
+    build_dataset,
+)
 from pharma_batch_record_checker.expected_findings import (
     CRITICAL,
     NEEDS_REVIEW,
     RULE_IDS,
 )
+from pharma_batch_record_checker.masters import PLC250
 
 DATASET = build_dataset(seed=0)
 
@@ -193,3 +198,36 @@ def test_defects_module_imports_no_rules_engine():
         and name not in ALLOWED_PROJECT_IMPORTS
     }
     assert disallowed == set()
+
+
+# --- Review fix B: dataset correctness --------------------------------------
+
+
+def test_sibling_batches_have_different_readings():
+    """Batches of the same product get their own clean readings."""
+    batches = batches_by_id(DATASET)
+    clean = {r.step_id: r.reading for r in batches["B26-0001"]}
+    defect = {r.step_id: r.reading for r in batches["B26-0002"]}
+    planted = {f.step_id for f in DATASET.findings if f.batch_id == "B26-0002"}
+    unplanted = [s for s in clean if s not in planted and clean[s] is not None]
+    assert any(clean[s] != defect[s] for s in unplanted)
+
+
+def test_dataset_masters_follow_plans():
+    """The masters returned are exactly those the planned batches execute."""
+    plans = [p for p in BATCH_PLANS if p.product is PLC250]
+    dataset = build_dataset(0, plans)
+    assert {m.master_record_id for m in dataset.masters} == {"MBR-PLC250"}
+    assert len(dataset.masters) == 10
+
+
+def test_rejects_duplicate_batch_ids():
+    """Two plans with the same batch_id would merge into one batch; refuse them."""
+    with pytest.raises(ValueError, match="B26-0001"):
+        build_dataset(0, [BATCH_PLANS[0], BATCH_PLANS[0]])
+
+
+def test_batch_plan_comments_are_read_only():
+    """The module-level plans can't be changed in place."""
+    with pytest.raises(TypeError):
+        BATCH_PLANS[2].comments["S-PACK-02"] = "changed"
