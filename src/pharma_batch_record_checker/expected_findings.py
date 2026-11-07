@@ -62,19 +62,52 @@ _check_header(ExpectedFinding, EXPECTED_FINDINGS_HEADER)
 class PlantedDefect:
     """A defect the generator planted: one rule broken on one batch step.
 
-    Build it with `PlantedDefect.on(...)` from the master step, so step_id
-    and the critical flag are never copied by hand.
+    Build it with `PlantedDefect.on(...)` from the master step, so step_id,
+    the master key, the critical flag and what the step measures are never
+    copied by hand. A defect that could never fire on its step (unknown rule,
+    a critical-only rule on a non-critical step, missing_reading on a step
+    with no reading, out_of_range on a step with no limits) is refused here,
+    at the planting call.
     """
 
     batch_id: str
+    master_record_id: str
+    master_version: str
     step_id: str
     critical: bool
-    rule_id: str
+    measured: bool
+    has_limits: bool
+    rule_id: RuleId
 
     @classmethod
     def on(cls, batch_id: str, step: MasterRow, rule_id: str) -> "PlantedDefect":
         """Record that `rule_id` was planted on master `step` in batch `batch_id`."""
-        return cls(batch_id, step.step_id, step.critical, rule_id)
+        return cls(
+            batch_id=batch_id,
+            master_record_id=step.master_record_id,
+            master_version=step.master_version,
+            step_id=step.step_id,
+            critical=step.critical,
+            measured=step.parameter is not None,
+            has_limits=step.min_value is not None or step.max_value is not None,
+            rule_id=rule_id,
+        )
+
+    def __post_init__(self) -> None:
+        """Refuse a defect whose rule can never fire on this step."""
+        problem = None
+        if self.rule_id not in RULE_IDS:
+            problem = "unknown rule_id"
+        elif self.rule_id in CRITICAL_ONLY_RULES and not self.critical:
+            problem = "applies to critical steps only"
+        elif self.rule_id == "missing_reading" and not self.measured:
+            problem = "a sign-off-only step has no reading to be missing"
+        elif self.rule_id == "out_of_range" and not self.has_limits:
+            problem = "the step has no limits to be outside of"
+        if problem:
+            raise ValueError(
+                f"batch {self.batch_id} step {self.step_id} {self.rule_id}: {problem}"
+            )
 
 
 def expected_findings(planted: Iterable[PlantedDefect]) -> list[ExpectedFinding]:
@@ -110,12 +143,8 @@ def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> No
     rules = [d.rule_id for d in defects]
     rule_set = set(rules)
     problems = []
-    if unknown := sorted(rule_set - set(RULE_IDS)):
-        problems.append(f"unknown rule_ids {unknown}")
     if repeated := sorted({r for r in rules if rules.count(r) > 1}):
         problems.append(f"rules planted more than once {repeated}")
-    if not defects[0].critical and (only := sorted(rule_set & CRITICAL_ONLY_RULES)):
-        problems.append(f"{only} apply to critical steps only")
     if "missing_step" in rule_set and len(rule_set) > 1:
         problems.append("missing_step leaves no row for other findings")
     if "out_of_range" in rule_set and rule_set & {"missing_reading", "unit_mismatch"}:

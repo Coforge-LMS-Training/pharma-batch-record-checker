@@ -352,3 +352,50 @@ def test_module_imports_no_rules_engine():
         and name not in ALLOWED_PROJECT_IMPORTS
     }
     assert disallowed == set()
+
+
+# --- Review fix A: check each defect when it is recorded --------------------
+
+SIGN_OFF = MASTER["S-PACK-01"]  # sign-off-only: no parameter, unit or limits
+
+
+def test_record_rejects_unknown_rule_immediately():
+    """A misspelled rule fails at the planting call, not at write time."""
+    log = DefectLog()
+    with pytest.raises(ValueError, match="out_of_ranges"):
+        log.record("T26-0001", PLAIN, "out_of_ranges")
+    assert log.planted == []
+
+
+def test_record_rejects_critical_only_rule_on_non_critical_step_immediately():
+    """same_person on a non-critical step fails at the planting call."""
+    with pytest.raises(ValueError, match="same_person"):
+        DefectLog().record("T26-0001", PLAIN, "same_person")
+
+
+def test_rejects_missing_reading_on_sign_off_step():
+    """A sign-off step has no reading to be missing, so the rule can't fire."""
+    with pytest.raises(ValueError, match="missing_reading"):
+        PlantedDefect.on("T26-0001", SIGN_OFF, "missing_reading")
+
+
+def test_rejects_out_of_range_on_sign_off_step():
+    """A step without limits can't be out of range."""
+    with pytest.raises(ValueError, match="out_of_range"):
+        PlantedDefect.on("T26-0001", SIGN_OFF, "out_of_range")
+
+
+def test_allows_unit_mismatch_on_sign_off_step():
+    """Writing a unit on a step whose master unit is blank does mismatch."""
+    findings = expected_findings(
+        [PlantedDefect.on("T26-0001", SIGN_OFF, "unit_mismatch")]
+    )
+    assert [(f.step_id, f.rule_id) for f in findings] == [
+        ("S-PACK-01", "unit_mismatch")
+    ]
+
+
+def test_planted_defect_records_master_key():
+    """The master's id and version are recorded with each defect."""
+    defect = PlantedDefect.on("T26-0001", PLAIN, "unit_mismatch")
+    assert (defect.master_record_id, defect.master_version) == ("MBR-SYN500", "3")
