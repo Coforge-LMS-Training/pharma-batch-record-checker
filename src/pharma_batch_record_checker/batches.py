@@ -7,10 +7,20 @@ batches later (PHA-37). All data is synthetic.
 
 import random
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
+
+# Synthetic operator identities. The two pools don't overlap, so a critical
+# step's verifier is never the person who performed it.
+PERFORMERS: tuple[str, ...] = ("OP-101", "OP-108", "OP-115", "OP-123")
+VERIFIERS: tuple[str, ...] = ("OP-131", "OP-142", "OP-157")
+
+# Step i is performed STEP_INTERVAL after step i-1; a critical step is
+# verified 5 to 20 whole minutes after it was performed.
+STEP_INTERVAL = timedelta(minutes=30)
+VERIFY_DELAY_MINUTES = (5, 20)
 
 
 def generate_clean_batch(
@@ -27,7 +37,12 @@ def generate_clean_batch(
     _check_single_master(master)
     rng = random.Random(seed)
     pins = _pick_boundary_steps(master, rng)
-    return [_clean_row(step, batch_id, rng, pins.get(step.step_id)) for step in master]
+    return [
+        _clean_row(
+            step, batch_id, rng, pins.get(step.step_id), start + i * STEP_INTERVAL
+        )
+        for i, step in enumerate(master)
+    ]
 
 
 def _check_single_master(master: Sequence[MasterRow]) -> None:
@@ -89,10 +104,24 @@ def _places(value: Decimal) -> int:
 
 
 def _clean_row(
-    step: MasterRow, batch_id: str, rng: random.Random, pin: str | None
+    step: MasterRow,
+    batch_id: str,
+    rng: random.Random,
+    pin: str | None,
+    performed_at: datetime,
 ) -> BatchRow:
-    """Build the clean batch row for one master step."""
+    """Build the clean batch row for one master step.
+
+    Every step gets a performer and time. Only critical steps get a second
+    check: a different person, strictly later.
+    """
     reading = None if step.parameter is None else _reading(step, rng, pin)
+    verified_by = verified_at = None
+    if step.critical:
+        verified_by = rng.choice(VERIFIERS)
+        verified_at = performed_at + timedelta(
+            minutes=rng.randint(*VERIFY_DELAY_MINUTES)
+        )
     return BatchRow(
         batch_id=batch_id,
         master_record_id=step.master_record_id,
@@ -100,9 +129,9 @@ def _clean_row(
         step_id=step.step_id,
         reading=reading,
         unit=step.unit,
-        performed_by=None,
-        performed_at=None,
-        verified_by=None,
-        verified_at=None,
+        performed_by=rng.choice(PERFORMERS),
+        performed_at=performed_at,
+        verified_by=verified_by,
+        verified_at=verified_at,
         comment=None,
     )

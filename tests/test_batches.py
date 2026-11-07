@@ -1,5 +1,6 @@
 """Tests for the clean executed-batch generator (PHA-35). All data is synthetic."""
 
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -148,3 +149,65 @@ def test_measured_step_without_limits_is_a_clear_error():
     master[2] = master[2].model_copy(update={"min_value": None, "max_value": None})
     with pytest.raises(ValueError, match=master[2].step_id):
         generate_clean_batch(master, "T26-0001", START, seed=0)
+
+
+# --- Slice 3: performers and timing -----------------------------------------
+
+
+@PRODUCTS
+@SEEDS
+def test_every_step_has_performer_and_time(product, seed):
+    """Every step records who performed it and when."""
+    _, batch = clean(product, seed)
+    for row in batch:
+        assert row.performed_by is not None
+        assert row.performed_at is not None
+
+
+@PRODUCTS
+@SEEDS
+def test_operator_ids_are_synthetic_op_nnn(product, seed):
+    """Performers and verifiers are synthetic OP-nnn identities."""
+    _, batch = clean(product, seed)
+    people = {r.performed_by for r in batch} | {r.verified_by for r in batch}
+    assert all(re.fullmatch(r"OP-[0-9]{3}", p) for p in people - {None})
+
+
+@PRODUCTS
+@SEEDS
+def test_critical_steps_verified_by_someone_else_later(product, seed):
+    """A critical step has a second person who signs strictly after the performer."""
+    master, batch = clean(product, seed)
+    for step, row in zip(master, batch, strict=True):
+        if step.critical:
+            assert row.verified_by is not None
+            assert row.verified_by != row.performed_by
+            assert row.verified_at > row.performed_at
+
+
+@PRODUCTS
+@SEEDS
+def test_non_critical_steps_not_verified(product, seed):
+    """Non-critical steps carry no second check, as in the client samples."""
+    master, batch = clean(product, seed)
+    for step, row in zip(master, batch, strict=True):
+        if not step.critical:
+            assert (row.verified_by, row.verified_at) == (None, None)
+
+
+@PRODUCTS
+def test_performed_times_increase_in_step_order(product):
+    """Steps are performed one after another, starting at the batch start."""
+    _, batch = clean(product)
+    times = [r.performed_at for r in batch]
+    assert times[0] == START
+    assert times == sorted(times)
+    assert len(set(times)) == len(times)
+
+
+def test_timestamps_serialize_to_minutes():
+    """Timestamps are written as YYYY-MM-DDTHH:MM, like the client samples."""
+    _, batch = clean(SYN500)
+    out = batch[0].to_csv_row()
+    assert out["performed_at"] == "2026-10-12T07:00"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", out["verified_at"])
