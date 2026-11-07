@@ -84,15 +84,24 @@ def _check_start(start: datetime) -> None:
 def _pick_boundary_steps(master: Sequence[MasterRow], rng: random.Random) -> dict:
     """Pick one measured step to read exactly its min and another its max.
 
-    This guarantees every clean batch contains boundary readings, which must
-    pass because limits are inclusive.
+    The two pins go to different steps whenever the master allows it, so a
+    clean batch contains both boundary readings (which must pass, because
+    limits are inclusive). Only if a single step carries the one usable max
+    and every min is pinned there is just the min boundary guaranteed.
     """
     with_min = [s.step_id for s in master if s.parameter and s.min_value is not None]
     with_max = [s.step_id for s in master if s.parameter and s.max_value is not None]
+    min_pick = rng.choice(with_min) if with_min else None
+    others = [step_id for step_id in with_max if step_id != min_pick]
+    if not others and with_max and len(with_min) > 1:
+        # The only max-limited step was picked for the min: move the min pin.
+        min_pick = rng.choice(
+            [step_id for step_id in with_min if step_id != with_max[0]]
+        )
+        others = with_max
     pins = {}
-    if with_min:
-        pins[rng.choice(with_min)] = "min"
-    others = [step_id for step_id in with_max if step_id not in pins]
+    if min_pick is not None:
+        pins[min_pick] = "min"
     if others:
         pins[rng.choice(others)] = "max"
     return pins
@@ -102,8 +111,9 @@ def _reading(step: MasterRow, rng: random.Random, pin: str | None) -> Decimal:
     """A reading inside the step's limits, at the limits' precision.
 
     Two-sided limits: anywhere on the grid from min to max, ends included.
-    One-sided limits get a plausible far side: min-only reads up to 2% above
-    the min, max-only reads from half the max up to the max.
+    One-sided limits get a plausible far side, sized from the limit's
+    magnitude so negative limits work too: min-only reads up to 2% of |min|
+    above the min, max-only reads from 50% of |max| below the max.
     """
     low, high = step.min_value, step.max_value
     if low is None and high is None:
@@ -118,9 +128,9 @@ def _reading(step: MasterRow, rng: random.Random, pin: str | None) -> Decimal:
     if pin == "max":
         return high.quantize(quantum)
     if high is None:
-        high = low * Decimal("1.02")
+        high = low + abs(low) * Decimal("0.02")
     if low is None:
-        low = high * Decimal("0.5")
+        low = high - abs(high) * Decimal("0.5")
     low = low.quantize(quantum, rounding=ROUND_CEILING)
     high = high.quantize(quantum, rounding=ROUND_FLOOR)
     steps = int((high - low) / quantum)

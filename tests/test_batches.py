@@ -7,7 +7,13 @@ from decimal import Decimal
 import pytest
 
 from pharma_batch_record_checker.batches import BENIGN_COMMENTS, generate_clean_batch
-from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
+from pharma_batch_record_checker.masters import (
+    PLC250,
+    SYN500,
+    ProductConfig,
+    StepTemplate,
+    build_master,
+)
 
 START = datetime(2026, 10, 12, 7, 0)
 PRODUCTS = pytest.mark.parametrize(
@@ -281,3 +287,58 @@ def test_clean_batch_rejects_timezone_aware_start():
     start = datetime(2026, 10, 12, 7, 0, tzinfo=UTC)
     with pytest.raises(ValueError, match="start"):
         generate_clean_batch(build_master(SYN500), "T26-0001", start, 0)
+
+
+# --- Review fix B: negative one-sided limits and pin selection --------------
+
+
+def tiny_master(limits):
+    """A made-up master with one measured step per limits entry, in order."""
+    process = tuple(
+        StepTemplate(step_id, "Testing", "Check", "Measure", "Value", "degC", False)
+        for step_id in limits
+    )
+    config = ProductConfig(
+        master_record_id="MBR-TST001",
+        master_version="1",
+        product_name="Testolin test product",
+        batch_size="100",
+        batch_size_unit="units",
+        excipient="starch",
+        process=process,
+        limits=limits,
+    )
+    return build_master(config)
+
+
+NEGATIVE_LIMITS = {
+    "S-A": ("0", "10"),
+    "S-MIN": ("-5.0", ""),  # min-only, below zero
+    "S-MAX": ("", "-10"),  # max-only, below zero
+}
+
+
+@SEEDS
+def test_negative_min_only_limit(seed):
+    """A negative min-only limit reads just above the min, without crashing."""
+    batch = generate_clean_batch(tiny_master(NEGATIVE_LIMITS), "T26-0001", START, seed)
+    reading = next(r.reading for r in batch if r.step_id == "S-MIN")
+    assert Decimal("-5.0") <= reading <= Decimal("-4.9")
+
+
+@SEEDS
+def test_negative_max_only_limit(seed):
+    """A negative max-only limit reads within half its size below the max."""
+    batch = generate_clean_batch(tiny_master(NEGATIVE_LIMITS), "T26-0001", START, seed)
+    reading = next(r.reading for r in batch if r.step_id == "S-MAX")
+    assert Decimal(-15) <= reading <= Decimal(-10)
+
+
+@SEEDS
+def test_max_boundary_found_when_only_max_step_also_has_min(seed):
+    """Pins go to different steps whenever possible, so both bounds appear."""
+    master = tiny_master({"S-BOTH": ("1", "2"), "S-MIN": ("5", "")})
+    batch = generate_clean_batch(master, "T26-0001", START, seed)
+    pairs = list(zip(master, batch, strict=True))
+    assert any(s.min_value is not None and r.reading == s.min_value for s, r in pairs)
+    assert any(s.max_value is not None and r.reading == s.max_value for s, r in pairs)
