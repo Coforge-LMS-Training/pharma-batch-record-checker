@@ -101,3 +101,29 @@ def disallowed_imports(
             else:
                 found.add(name)
     return found
+
+
+def is_within(name: str, package: str) -> bool:
+    """True if `name` is `package` or a module inside it (dot boundary)."""
+    return name == package or name.startswith(package + ".")
+
+
+def project_modules(
+    src_root: Path, package: str, exclude: Iterable[str] = ()
+) -> list[str]:
+    """All modules of `package` found on disk, recursing into subpackages.
+
+    Read from the source tree (nothing is imported). Modules within any
+    package in `exclude` are skipped. Sorted, package itself first.
+    """
+    excluded = tuple(exclude)
+    base = src_root / package.replace(".", "/")
+    found = []
+    for path in base.rglob("*.py"):
+        parts = list(path.relative_to(src_root).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        name = ".".join(parts)
+        if not any(is_within(name, ex) for ex in excluded):
+            found.append(name)
+    return sorted(found)

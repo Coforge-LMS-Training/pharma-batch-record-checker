@@ -9,11 +9,12 @@ import importlib
 
 import pytest
 
-GENERATOR_MODULES = ("masters", "batches", "defects", "expected_findings")
+from tests.generator import KNOWN_GENERATOR_MODULES
+
 PACKAGE = "pharma_batch_record_checker"
 
 
-@pytest.mark.parametrize("name", GENERATOR_MODULES)
+@pytest.mark.parametrize("name", KNOWN_GENERATOR_MODULES)
 def test_old_top_level_modules_are_gone(name):
     """No stale copy of a generator module is left at the top level.
 

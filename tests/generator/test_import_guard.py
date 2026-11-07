@@ -1,6 +1,11 @@
 """Tests for the shared import guard used to keep generator code engine-free."""
 
-from tests.import_guard import disallowed_imports, module_imports
+from tests.import_guard import (
+    disallowed_imports,
+    is_within,
+    module_imports,
+    project_modules,
+)
 
 PKG = "pharma_batch_record_checker"
 
@@ -93,3 +98,37 @@ def test_relative_import_in_init_resolves_within_package(tmp_path):
     root = make_package(tmp_path, {"masters": ""})
     (root / PKG / "__init__.py").write_text("from . import masters\n")
     assert module_imports(root, PKG) == {f"{PKG}.masters"}
+
+
+# --- Recursive discovery and package boundaries -----------------------------
+
+
+def test_project_modules_finds_nested_subpackages(tmp_path):
+    """Modules in nested subpackages are found; excluded subtrees are skipped."""
+    root = make_package(tmp_path, {"a": ""})
+    sub = root / PKG / "sub"
+    sub.mkdir()
+    (sub / "__init__.py").write_text("")
+    (sub / "b.py").write_text("")
+    skip = root / PKG / "generator"
+    skip.mkdir()
+    (skip / "__init__.py").write_text("")
+    (skip / "c.py").write_text("")
+    assert project_modules(root, PKG, exclude={f"{PKG}.generator"}) == [
+        PKG,
+        f"{PKG}.a",
+        f"{PKG}.sub",
+        f"{PKG}.sub.b",
+    ]
+    assert project_modules(root, f"{PKG}.generator") == [
+        f"{PKG}.generator",
+        f"{PKG}.generator.c",
+    ]
+
+
+def test_generator_prefix_needs_dot_boundary():
+    """A module is within a package only at a dot boundary."""
+    assert is_within(f"{PKG}.generator", f"{PKG}.generator")
+    assert is_within(f"{PKG}.generator.masters", f"{PKG}.generator")
+    assert not is_within(f"{PKG}.generator_config", f"{PKG}.generator")
+    assert not is_within(f"{PKG}.generators.x", f"{PKG}.generator")
