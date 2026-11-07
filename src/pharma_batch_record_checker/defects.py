@@ -63,6 +63,19 @@ class Defect:
     unit: str | None = None
     side: Literal["low", "high"] | None = None
 
+    def __post_init__(self) -> None:
+        """Refuse options that the rule would silently ignore."""
+        if self.unit is not None and self.rule_id != "unit_mismatch":
+            raise ValueError(
+                f"{self.step_id}: unit= only applies to unit_mismatch, "
+                f"not {self.rule_id}"
+            )
+        if self.side is not None and self.rule_id != "out_of_range":
+            raise ValueError(
+                f"{self.step_id}: side= only applies to out_of_range, "
+                f"not {self.rule_id}"
+            )
+
 
 def plant_defects(
     master: Sequence[MasterRow],
@@ -116,7 +129,7 @@ def plant_defects(
 def _check_clean_batch(
     master: Sequence[MasterRow], clean_batch: Sequence[BatchRow]
 ) -> str:
-    """The clean batch must be one batch of this master, each step once.
+    """The clean batch must be one batch of this master, every step exactly once.
 
     Returns its batch_id.
     """
@@ -134,6 +147,10 @@ def _check_clean_batch(
         raise ValueError(f"clean batch repeats steps {duplicates}")
     if unknown := sorted(set(step_ids) - {s.step_id for s in master}):
         raise ValueError(f"clean batch has steps not in the master {unknown}")
+    if missing := sorted({s.step_id for s in master} - set(step_ids)):
+        raise ValueError(
+            f"clean batch lacks master steps {missing}; plant missing_step instead"
+        )
     return batch_ids.pop()
 
 
@@ -166,6 +183,8 @@ def _changes(defect: Defect, step: MasterRow, row: BatchRow) -> dict[str, Any]:
     if rule == "missing_second_check":
         return {"verified_by": None, "verified_at": None}
     if rule == "same_person":
+        if row.performed_by is None:
+            raise ValueError(f"{defect.step_id}: same_person has no performer to copy")
         return {"verified_by": row.performed_by}
     if rule == "verifier_before_performer":
         changes: dict[str, Any] = {"verified_at": row.performed_at - VERIFY_TOO_EARLY}

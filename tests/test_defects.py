@@ -303,3 +303,36 @@ def test_applicability_error_comes_first():
     master, clean = clean_parts()
     with pytest.raises(ValueError, match="no limits"):
         plant_defects(master, clean, [Defect("S-PACK-01", "out_of_range")], DefectLog())
+
+
+# --- PHA-37 follow-up A: complete clean batches, strict options -------------
+
+
+def test_rejects_clean_batch_missing_a_step():
+    """A missing step must be planted as missing_step, so the answer key lists it."""
+    master, clean = clean_parts()
+    with pytest.raises(ValueError, match="S-PACK-02"):
+        plant_defects(master, clean[:-1], [], DefectLog())
+
+
+def test_defect_rejects_unit_for_other_rules():
+    """unit= only means something for unit_mismatch."""
+    with pytest.raises(ValueError, match="unit"):
+        Defect("S-GRAN-02", "out_of_range", unit="degF")
+
+
+def test_defect_rejects_side_for_other_rules():
+    """side= only means something for out_of_range."""
+    with pytest.raises(ValueError, match="side"):
+        Defect("S-GRAN-02", "unit_mismatch", unit="case", side="low")
+
+
+def test_same_person_needs_a_performer():
+    """same_person copies the performer; with none there is nothing to copy."""
+    master, clean = clean_parts()
+    defects = [
+        Defect("S-COMP-01", "missing_performer"),
+        Defect("S-COMP-01", "same_person"),
+    ]
+    with pytest.raises(ValueError, match="no performer to copy"):
+        plant_defects(master, clean, defects, DefectLog())
