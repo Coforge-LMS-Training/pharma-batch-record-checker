@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 
 from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
-from pharma_batch_record_checker.defects import build_dataset
+from pharma_batch_record_checker.generator.defects import build_dataset
 from pharma_batch_record_checker.parser import (
     ParseError,
     ParseResult,

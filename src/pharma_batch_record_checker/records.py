@@ -27,7 +27,7 @@ from pharma_batch_record_checker.schema import (
     BATCH_HEADER,
     BatchRow,
     MasterRow,
-    _check_header,
+    check_header,
 )
 
 
@@ -197,4 +197,4 @@ class BatchStep(BatchRow):
 
 
 # BatchStep must stay exactly the approved batch columns.
-_check_header(BatchStep, BATCH_HEADER)
+check_header(BatchStep, BATCH_HEADER)
