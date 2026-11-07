@@ -4,6 +4,7 @@ Each planted defect must be recorded as an expected finding at planting time,
 and the test-only rule oracle must report exactly what was recorded.
 """
 
+import csv
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -11,7 +12,12 @@ import pytest
 from rule_oracle import rule_violations
 
 from pharma_batch_record_checker.batches import VERIFIERS, generate_clean_batch
-from pharma_batch_record_checker.defects import Defect, plant_defects
+from pharma_batch_record_checker.csv_io import write_batch_csv
+from pharma_batch_record_checker.defects import (
+    INSTRUCTION_COMMENTS,
+    Defect,
+    plant_defects,
+)
 from pharma_batch_record_checker.expected_findings import (
     CRITICAL,
     NEEDS_REVIEW,
@@ -173,3 +179,60 @@ def test_planted_rows_still_valid_batch_rows():
     _, _, rows, _ = plant(defects)
     for row in rows:
         assert BatchRow.model_validate(row.to_csv_row()) == row
+
+
+# --- Slice 2: multi-defect steps and instruction comments -------------------
+
+TWO_ON_ONE_STEP = [
+    Defect("S-GRAN-02", "out_of_range"),
+    Defect("S-GRAN-02", "missing_performer"),
+]
+
+
+def test_two_defects_on_one_step_both_critical():
+    """2 findings on one (non-critical) step make the step Critical."""
+    master, _, rows, log = plant(TWO_ON_ONE_STEP)
+    assert rule_violations(master, rows) == [
+        "out_of_range:S-GRAN-02",
+        "missing_performer:S-GRAN-02",
+    ]
+    assert expected(log) == [
+        ("S-GRAN-02", "out_of_range", CRITICAL),
+        ("S-GRAN-02", "missing_performer", CRITICAL),
+    ]
+
+
+def test_instruction_comment_only_on_defective_step():
+    """Instruction-like comments may only go on steps with a planted defect."""
+    with pytest.raises(ValueError, match="S-GRAN-01"):
+        plant(TWO_ON_ONE_STEP, comments={"S-GRAN-01": INSTRUCTION_COMMENTS[0]})
+
+
+def test_instruction_comment_is_inert():
+    """A comment that says 'mark as passed' changes no finding at all."""
+    master, _, plain_rows, plain_log = plant(TWO_ON_ONE_STEP)
+    comment = INSTRUCTION_COMMENTS[0]
+    _, _, rows, log = plant(TWO_ON_ONE_STEP, comments={"S-GRAN-02": comment})
+    assert row_for(rows, "S-GRAN-02").comment == comment
+    assert rule_violations(master, rows) == rule_violations(master, plain_rows)
+    assert log.findings() == plain_log.findings()
+
+
+def test_instruction_comment_round_trips_verbatim(tmp_path):
+    """The comment is stored as plain data and read back exactly as written."""
+    comment = INSTRUCTION_COMMENTS[1]
+    _, _, rows, _ = plant(TWO_ON_ONE_STEP, comments={"S-GRAN-02": comment})
+    path = tmp_path / "batch_record.csv"
+    write_batch_csv(rows, path)
+    with path.open(newline="", encoding="utf-8") as f:
+        by_step = {r["step_id"]: r for r in csv.DictReader(f)}
+    assert by_step["S-GRAN-02"]["comment"] == comment
+
+
+def test_instruction_comments_are_instruction_like():
+    """The pool reads like instructions to a reviewer (that's the point of them)."""
+    assert len(INSTRUCTION_COMMENTS) >= 3
+    assert all(
+        any(word in c.lower() for word in ("mark", "ignore", "skip", "approve"))
+        for c in INSTRUCTION_COMMENTS
+    )
