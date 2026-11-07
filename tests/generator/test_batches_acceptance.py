@@ -7,10 +7,10 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
-from rule_oracle import rule_violations
 
-from pharma_batch_record_checker.batches import generate_clean_batch
-from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
+from pharma_batch_record_checker.generator.batches import generate_clean_batch
+from pharma_batch_record_checker.generator.masters import PLC250, SYN500, build_master
+from tests.generator.rule_oracle import rule_violations
 
 
 @pytest.mark.parametrize("product", [SYN500, PLC250], ids=lambda p: p.master_record_id)

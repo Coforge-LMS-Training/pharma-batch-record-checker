@@ -6,8 +6,12 @@ import os
 
 import pytest
 
-from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
-from pharma_batch_record_checker.schema import BatchRow, MasterRow
+from pharma_batch_record_checker.csv_io import (
+    write_batch_csv,
+    write_csv,
+    write_master_csv,
+)
+from pharma_batch_record_checker.schema import BATCH_HEADER, BatchRow, MasterRow
 
 CLIENT_MASTER_HEADER = (
     "master_record_id,master_version,product_name,batch_size,batch_size_unit,"
@@ -247,3 +251,10 @@ def test_write_csv_keeps_existing_file_mode(tmp_path):
     path.chmod(0o640)
     write_batch_csv([batch_row()], path)
     assert path.stat().st_mode & 0o777 == 0o640
+
+
+def test_write_csv_is_public_contract(tmp_path):
+    """write_csv(header, rows, dest) writes any CsvRow type in the contract format."""
+    path = tmp_path / "rows.csv"
+    write_csv(BATCH_HEADER, [batch_row()], path)
+    assert path.read_bytes().split(b"\r\n")[0].decode() == ",".join(BATCH_HEADER)

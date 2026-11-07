@@ -8,21 +8,21 @@ import dataclasses
 from collections import Counter
 
 import pytest
-from import_guard import disallowed_imports
-from rule_oracle import rule_violations
 
-import pharma_batch_record_checker.defects as defects_module
-from pharma_batch_record_checker.defects import (
+import pharma_batch_record_checker.generator.defects as defects_module
+from pharma_batch_record_checker.generator.defects import (
     BATCH_PLANS,
     INSTRUCTION_COMMENTS,
     build_dataset,
 )
-from pharma_batch_record_checker.expected_findings import (
+from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
     NEEDS_REVIEW,
     RULE_IDS,
 )
-from pharma_batch_record_checker.masters import PLC250, SYN500
+from pharma_batch_record_checker.generator.masters import PLC250, SYN500
+from tests.generator.rule_oracle import rule_violations
+from tests.import_guard import disallowed_imports
 
 DATASET = build_dataset(seed=0)
 
@@ -174,9 +174,9 @@ def test_expected_findings_match_oracle_for_any_seed(seed):
 DEFECTS_ALLOWED_PROJECT = {
     "pharma_batch_record_checker.schema",
     "pharma_batch_record_checker.csv_io",
-    "pharma_batch_record_checker.batches",
-    "pharma_batch_record_checker.masters",
-    "pharma_batch_record_checker.expected_findings",
+    "pharma_batch_record_checker.generator.batches",
+    "pharma_batch_record_checker.generator.masters",
+    "pharma_batch_record_checker.generator.expected_findings",
 }
 
 
@@ -184,7 +184,7 @@ def test_defects_module_imports_no_rules_engine():
     """Planting never imports a rules engine or the test oracle, even indirectly."""
     assert (
         disallowed_imports(
-            "pharma_batch_record_checker.defects", DEFECTS_ALLOWED_PROJECT
+            "pharma_batch_record_checker.generator.defects", DEFECTS_ALLOWED_PROJECT
         )
         == set()
     )

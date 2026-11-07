@@ -96,8 +96,13 @@ def _format_cell(value: Any) -> str:
     return str(value)
 
 
-class _CsvRow(BaseModel):
-    """Base for row models: frozen, no extra columns, and CSV serialization."""
+class CsvRow(BaseModel):
+    """Base for CSV row models: frozen, no extra columns, CSV serialization.
+
+    Public contract API: other modules (e.g. the generator's expected
+    findings) define their own row types on it, together with check_header
+    and csv_io.write_csv.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -141,7 +146,7 @@ BATCH_HEADER: tuple[str, ...] = (
 )
 
 
-class MasterRow(_CsvRow):
+class MasterRow(CsvRow):
     """One step of a master record (master_record.csv).
 
     Limits are inclusive, and a blank limit means no limit on that side.
@@ -218,7 +223,7 @@ class MasterRow(_CsvRow):
         return self
 
 
-class BatchRow(_CsvRow):
+class BatchRow(CsvRow):
     """One executed step of a batch (batch_record.csv).
 
     Only the join key is required. Everything else may be blank, and there are
@@ -253,8 +258,10 @@ class BatchRow(_CsvRow):
     )
 
 
-def _check_header(model: type[_CsvRow], header: tuple[str, ...]) -> None:
+def check_header(model: type[CsvRow], header: tuple[str, ...]) -> None:
     """Fail fast if a model's field order drifts from its client header.
+
+    Public contract API: call it at import time for every CsvRow model.
 
     The header constants are the client contract and stay explicit; this check
     runs at import time so a reordered or added field breaks immediately
@@ -267,5 +274,5 @@ def _check_header(model: type[_CsvRow], header: tuple[str, ...]) -> None:
         )
 
 
-_check_header(MasterRow, MASTER_HEADER)
-_check_header(BatchRow, BATCH_HEADER)
+check_header(MasterRow, MASTER_HEADER)
+check_header(BatchRow, BATCH_HEADER)

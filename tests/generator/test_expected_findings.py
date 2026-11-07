@@ -7,10 +7,9 @@ import csv
 import io
 
 import pytest
-from import_guard import disallowed_imports
 from pydantic import ValidationError
 
-from pharma_batch_record_checker.expected_findings import (
+from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
     EXPECTED_FINDINGS_HEADER,
     NEEDS_REVIEW,
@@ -21,7 +20,8 @@ from pharma_batch_record_checker.expected_findings import (
     expected_findings,
     write_expected_findings,
 )
-from pharma_batch_record_checker.masters import PLC250, SYN500, build_master
+from pharma_batch_record_checker.generator.masters import PLC250, SYN500, build_master
+from tests.import_guard import disallowed_imports
 
 # --- Slice 1: row model and constants ---------------------------------------
 
@@ -336,7 +336,8 @@ def test_module_imports_no_rules_engine():
     """
     assert (
         disallowed_imports(
-            "pharma_batch_record_checker.expected_findings", ALLOWED_PROJECT_IMPORTS
+            "pharma_batch_record_checker.generator.expected_findings",
+            ALLOWED_PROJECT_IMPORTS,
         )
         == set()
     )

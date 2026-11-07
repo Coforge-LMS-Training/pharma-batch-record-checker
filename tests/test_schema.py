@@ -10,8 +10,10 @@ from pharma_batch_record_checker.schema import (
     BATCH_HEADER,
     MASTER_HEADER,
     BatchRow,
+    CsvRow,
     MasterRow,
-    _check_header,
+    Text,
+    check_header,
 )
 
 # Exact client-approved headers, copied verbatim from the issue.
@@ -492,14 +494,14 @@ def test_timestamp_rejects_non_ascii_digits():
 
 def test_check_header_accepts_real_models():
     """Both models match their client header (also checked at import time)."""
-    _check_header(MasterRow, MASTER_HEADER)
-    _check_header(BatchRow, BATCH_HEADER)
+    check_header(MasterRow, MASTER_HEADER)
+    check_header(BatchRow, BATCH_HEADER)
 
 
 def test_check_header_raises_on_mismatch():
     """A model whose field order differs from its header is caught immediately."""
     with pytest.raises(RuntimeError):
-        _check_header(MasterRow, tuple(reversed(MASTER_HEADER)))
+        check_header(MasterRow, tuple(reversed(MASTER_HEADER)))
 
 
 # --- Review 3 fix: timestamp input types ------------------------------------
@@ -518,3 +520,21 @@ def test_batch_timestamp_rejects_non_text_non_datetime(raw):
     """Only text or a datetime is accepted; other types would skip the minute check."""
     with pytest.raises(ValidationError):
         BatchRow.model_validate(batch_data(performed_at=raw))
+
+
+# --- Public contract helpers ------------------------------------------------
+
+
+def test_csv_row_and_check_header_are_public_contract():
+    """Other modules build CSV row types on the public CsvRow + check_header."""
+
+    class TwoColumns(CsvRow):
+        """A minimal row type defined outside schema.py."""
+
+        a: Text
+        b: Text
+
+    check_header(TwoColumns, ("a", "b"))
+    assert TwoColumns(a="x", b="y").to_csv_row() == {"a": "x", "b": "y"}
+    with pytest.raises(RuntimeError):
+        check_header(TwoColumns, ("b", "a"))
