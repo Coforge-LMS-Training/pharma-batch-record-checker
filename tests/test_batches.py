@@ -1,7 +1,7 @@
 """Tests for the clean executed-batch generator (PHA-35). All data is synthetic."""
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -243,3 +243,41 @@ def test_some_measured_steps_have_comments():
         if r.comment is not None and r.reading is not None
     ]
     assert commented
+
+
+# --- Review fix A: master and start checks ----------------------------------
+
+
+@PRODUCTS
+def test_rows_follow_step_seq_not_input_order(product):
+    """Master rows in any order give the same batch, timed in step_seq order."""
+    master = build_master(product)
+    shuffled = list(reversed(master))
+    assert generate_clean_batch(shuffled, "T26-0001", START, 3) == (
+        generate_clean_batch(master, "T26-0001", START, 3)
+    )
+
+
+def test_clean_batch_rejects_duplicate_step_ids():
+    """A repeated step would duplicate the join key, so it is refused by name."""
+    master = build_master(SYN500)
+    with pytest.raises(ValueError, match="S-PACK-01"):
+        generate_clean_batch([*master, master[14]], "T26-0001", START, 0)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [datetime(2026, 10, 12, 7, 0, 30), datetime(2026, 10, 12, 7, 0, 0, 5)],
+    ids=["seconds", "microseconds"],
+)
+def test_clean_batch_rejects_start_not_whole_minute(start):
+    """Timestamps are minute precision, so the start must be a whole minute."""
+    with pytest.raises(ValueError, match="start"):
+        generate_clean_batch(build_master(SYN500), "T26-0001", start, 0)
+
+
+def test_clean_batch_rejects_timezone_aware_start():
+    """Timestamps have no timezone, so a timezone-aware start is refused."""
+    start = datetime(2026, 10, 12, 7, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="start"):
+        generate_clean_batch(build_master(SYN500), "T26-0001", start, 0)

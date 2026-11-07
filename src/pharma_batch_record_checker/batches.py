@@ -46,9 +46,13 @@ def generate_clean_batch(
     """Generate a clean executed batch for one master.
 
     `master` must be the rows of exactly one master (one master_record_id and
-    master_version). The same arguments always give the same rows.
+    master_version), each step once; they may come in any order and are put
+    in step_seq order. `start` is when the first step is performed: a naive
+    datetime on a whole minute. The same arguments always give the same rows.
     """
-    _check_single_master(master)
+    _check_master(master)
+    _check_start(start)
+    master = sorted(master, key=lambda step: step.step_seq)
     rng = random.Random(seed)
     pins = _pick_boundary_steps(master, rng)
     return [
@@ -59,11 +63,22 @@ def generate_clean_batch(
     ]
 
 
-def _check_single_master(master: Sequence[MasterRow]) -> None:
-    """A batch executes one master; refuse empty or mixed master rows."""
+def _check_master(master: Sequence[MasterRow]) -> None:
+    """A batch executes one master, each step once; refuse anything else."""
     keys = {(s.master_record_id, s.master_version) for s in master}
     if len(keys) != 1:
         raise ValueError(f"master rows must come from one master, got {sorted(keys)}")
+    ids = [s.step_id for s in master]
+    if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
+        raise ValueError(f"master has duplicate step_ids {duplicates}")
+
+
+def _check_start(start: datetime) -> None:
+    """Timestamps are naive and minute precision, so start must be too."""
+    if start.tzinfo is not None:
+        raise ValueError(f"start must have no timezone, got {start.isoformat()}")
+    if start.second or start.microsecond:
+        raise ValueError(f"start must be a whole minute, got {start.isoformat()}")
 
 
 def _pick_boundary_steps(master: Sequence[MasterRow], rng: random.Random) -> dict:
