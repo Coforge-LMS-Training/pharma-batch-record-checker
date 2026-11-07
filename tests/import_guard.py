@@ -21,8 +21,11 @@ def module_imports(src_root: Path, module_name: str) -> set[str]:
     Relative imports are resolved against the module's package, and
     `from package import submodule` is reported as `package.submodule`.
     """
-    path = src_root / (module_name.replace(".", "/") + ".py")
-    package_parts = module_name.split(".")[:-1]
+    path, is_package = _module_path(src_root, module_name)
+    parts = module_name.split(".")
+    # Relative imports resolve against the module's package; for a package's
+    # own __init__.py, that package is the module itself.
+    package_parts = parts if is_package else parts[:-1]
     names: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text("utf-8"))):
         if isinstance(node, ast.Import):
@@ -35,6 +38,22 @@ def module_imports(src_root: Path, module_name: str) -> set[str]:
                 target = node.module or ""
             names |= _expand_package_import(src_root, target, node.names)
     return names
+
+
+def _module_path(src_root: Path, module_name: str) -> tuple[Path, bool]:
+    """The source file of a module: `name.py`, or `name/__init__.py` for a package."""
+    base = src_root / module_name.replace(".", "/")
+    if base.with_suffix(".py").is_file():
+        return base.with_suffix(".py"), False
+    if (base / "__init__.py").is_file():
+        return base / "__init__.py", True
+    raise FileNotFoundError(f"no source for module {module_name} under {src_root}")
+
+
+def _parent_packages(module_name: str) -> list[str]:
+    """Packages whose __init__ runs when module_name is imported (outermost first)."""
+    parts = module_name.split(".")
+    return [".".join(parts[:i]) for i in range(1, len(parts))]
 
 
 def _expand_package_import(
@@ -60,6 +79,8 @@ def disallowed_imports(
 
     Allowed: the standard library, `extra_allowed` packages, and the project
     modules in `allowed_project` (whose own imports are checked the same way).
+    Importing a module also runs its parent packages' __init__.py, so those are
+    always checked too.
     """
     extra = set(extra_allowed)
     found: set[str] = set()
@@ -70,6 +91,7 @@ def disallowed_imports(
         if current in seen:
             continue
         seen.add(current)
+        queue += [p for p in _parent_packages(current) if p.split(".")[0] == PROJECT]
         for name in module_imports(src_root, current):
             top = name.split(".")[0]
             if top in sys.stdlib_module_names or top in extra:

@@ -71,7 +71,7 @@ class ProductConfig:
     batch_size_unit: str
     excipient: str
     process: tuple[StepTemplate, ...]
-    limits: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    limits: Mapping[str, tuple[str, str]] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         """Freeze limits as a read-only copy of the mapping passed in."""

@@ -6,7 +6,8 @@ batches later (PHA-37). All data is synthetic.
 """
 
 import random
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
@@ -68,9 +69,13 @@ def _check_master(master: Sequence[MasterRow]) -> None:
     keys = {(s.master_record_id, s.master_version) for s in master}
     if len(keys) != 1:
         raise ValueError(f"master rows must come from one master, got {sorted(keys)}")
-    ids = [s.step_id for s in master]
-    if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
+    if duplicates := repeated(s.step_id for s in master):
         raise ValueError(f"master has duplicate step_ids {duplicates}")
+
+
+def repeated(values: Iterable[str]) -> list[str]:
+    """Values that occur more than once, sorted, each listed once."""
+    return sorted(v for v, n in Counter(values).items() if n > 1)
 
 
 def _check_start(start: datetime) -> None:

@@ -4,12 +4,14 @@ Expected findings are produced while planting (DefectLog). The test-only rule
 oracle is run here only to confirm they match; the generator never runs it.
 """
 
+import dataclasses
 from collections import Counter
 
 import pytest
 from import_guard import disallowed_imports
 from rule_oracle import rule_violations
 
+import pharma_batch_record_checker.defects as defects_module
 from pharma_batch_record_checker.defects import (
     BATCH_PLANS,
     INSTRUCTION_COMMENTS,
@@ -20,7 +22,7 @@ from pharma_batch_record_checker.expected_findings import (
     NEEDS_REVIEW,
     RULE_IDS,
 )
-from pharma_batch_record_checker.masters import PLC250
+from pharma_batch_record_checker.masters import PLC250, SYN500
 
 DATASET = build_dataset(seed=0)
 
@@ -219,3 +221,44 @@ def test_batch_plan_comments_are_read_only():
     """The module-level plans can't be changed in place."""
     with pytest.raises(TypeError):
         BATCH_PLANS[2].comments["S-PACK-02"] = "changed"
+
+
+# --- PHA-37 follow-up B: dataset and config ---------------------------------
+
+
+def test_batch_plan_is_hashable():
+    """Plans can be used in sets and as dict keys."""
+    assert len(set(BATCH_PLANS)) == len(BATCH_PLANS)
+
+
+def test_equal_product_instances_share_one_master():
+    """An equal but separate ProductConfig is the same master, built once."""
+    twin = dataclasses.replace(SYN500)
+    plans = [
+        dataclasses.replace(BATCH_PLANS[0], product=SYN500),
+        dataclasses.replace(BATCH_PLANS[2], product=twin),
+    ]
+    dataset = build_dataset(0, plans)
+    assert len(dataset.masters) == 16
+
+
+def test_conflicting_products_with_same_key_rejected():
+    """Two different configs claiming one master id and version are refused."""
+    clash = dataclasses.replace(SYN500, product_name="Synthetol 500 mg tablets v2")
+    plans = [
+        dataclasses.replace(BATCH_PLANS[0], product=SYN500),
+        dataclasses.replace(BATCH_PLANS[0], batch_id="B26-0009", product=clash),
+    ]
+    with pytest.raises(ValueError, match="MBR-SYN500 v3"):
+        build_dataset(0, plans)
+
+
+def test_each_master_built_once(monkeypatch):
+    """Each product's master is built once and reused for its batches."""
+    calls = []
+    real = defects_module.build_master
+    monkeypatch.setattr(
+        defects_module, "build_master", lambda p: (calls.append(p), real(p))[1]
+    )
+    build_dataset(0)
+    assert len(calls) == 2

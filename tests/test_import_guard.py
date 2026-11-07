@@ -65,3 +65,31 @@ def test_missing_submodule_is_named_precisely(tmp_path):
     """A relative import of a module that doesn't exist is still named in full."""
     root = make_package(tmp_path, {"defects": "from . import rules_engine\n"})
     assert disallowed_imports(f"{PKG}.defects", set(), root) == {f"{PKG}.rules_engine"}
+
+
+# --- PHA-37 follow-up C: package __init__ files ------------------------------
+
+
+def test_package_init_is_scanned(tmp_path):
+    """Importing any submodule runs the package __init__, so it is checked too."""
+    root = make_package(
+        tmp_path, {"masters": "", "defects": "from .masters import thing\n"}
+    )
+    (root / PKG / "__init__.py").write_text("from .rules_engine import evaluate\n")
+    assert disallowed_imports(f"{PKG}.defects", {f"{PKG}.masters"}, root) == {
+        f"{PKG}.rules_engine"
+    }
+
+
+def test_package_module_reads_init(tmp_path):
+    """A package on the allowlist is read from its __init__.py, without crashing."""
+    root = make_package(tmp_path, {"defects": f"import {PKG}\n"})
+    (root / PKG / "__init__.py").write_text("import json\n")
+    assert disallowed_imports(f"{PKG}.defects", {PKG}, root) == set()
+
+
+def test_relative_import_in_init_resolves_within_package(tmp_path):
+    """'from . import masters' in the package __init__ means the package's masters."""
+    root = make_package(tmp_path, {"masters": ""})
+    (root / PKG / "__init__.py").write_text("from . import masters\n")
+    assert module_imports(root, PKG) == {f"{PKG}.masters"}
