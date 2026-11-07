@@ -6,7 +6,11 @@ from decimal import Decimal
 
 import pytest
 
-from pharma_batch_record_checker.batches import BENIGN_COMMENTS, generate_clean_batch
+from pharma_batch_record_checker.batches import (
+    BENIGN_COMMENTS,
+    generate_clean_batch,
+    limit_quantum,
+)
 from pharma_batch_record_checker.masters import (
     PLC250,
     SYN500,
@@ -342,3 +346,20 @@ def test_max_boundary_found_when_only_max_step_also_has_min(seed):
     pairs = list(zip(master, batch, strict=True))
     assert any(s.min_value is not None and r.reading == s.min_value for s, r in pairs)
     assert any(s.max_value is not None and r.reading == s.max_value for s, r in pairs)
+
+
+# --- Review fix (PHA-37): shared limit precision ----------------------------
+
+
+@pytest.mark.parametrize(
+    ("product", "step_id", "quantum"),
+    [
+        (SYN500, "S-DISP-01", "0.01"),  # 149.25-150.75
+        (SYN500, "S-GRAN-02", "1"),  # 150-200
+        (PLC250, "S-BLEND-02", "0.1"),  # max-only 3.0
+    ],
+)
+def test_limit_quantum(product, step_id, quantum):
+    """The reading grid step is the finest precision among the step's limits."""
+    (step,) = [s for s in build_master(product) if s.step_id == step_id]
+    assert str(limit_quantum(step)) == quantum

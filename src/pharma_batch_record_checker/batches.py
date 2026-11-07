@@ -121,8 +121,7 @@ def _reading(step: MasterRow, rng: random.Random, pin: str | None) -> Decimal:
             f"{step.step_id}: a measured step needs at least one limit "
             "to generate a clean reading"
         )
-    places = max(_places(v) for v in (low, high) if v is not None)
-    quantum = Decimal(1).scaleb(-places)
+    quantum = limit_quantum(step)
     if pin == "min":
         return low.quantize(quantum)
     if pin == "max":
@@ -135,6 +134,18 @@ def _reading(step: MasterRow, rng: random.Random, pin: str | None) -> Decimal:
     high = high.quantize(quantum, rounding=ROUND_FLOOR)
     steps = int((high - low) / quantum)
     return (low + rng.randint(0, steps) * quantum).quantize(quantum)
+
+
+def limit_quantum(step: MasterRow) -> Decimal:
+    """The grid step for a step's readings: its limits' finest precision.
+
+    "149.25"/"150.75" give 0.01, "150"/"200" give 1, a max-only "3.0" gives
+    0.1. Clean readings and planted out-of-range readings both use it.
+    """
+    limits = [v for v in (step.min_value, step.max_value) if v is not None]
+    if not limits:
+        raise ValueError(f"{step.step_id}: no limits to take a precision from")
+    return Decimal(1).scaleb(-max(_places(v) for v in limits))
 
 
 def _places(value: Decimal) -> int:
