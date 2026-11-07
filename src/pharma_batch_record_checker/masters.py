@@ -143,6 +143,20 @@ TABLET_PROCESS: tuple[StepTemplate, ...] = (
     StepTemplate("S-PACK-02", "Packaging", "Blister packaging", "Check label", "Label count reconciliation", "%", False),
 )  # fmt: skip
 
+# Hard capsule, dry-blend route (10 steps).
+CAPSULE_PROCESS: tuple[StepTemplate, ...] = (
+    _WEIGH_API,
+    _WEIGH_EXCIPIENT,
+    StepTemplate("S-BLEND-01", "Blending", "Pre-blend", "Blend", "Blend time", "min", False),
+    StepTemplate("S-BLEND-02", "Blending", "Pre-blend", "Check dryness", "Loss on drying", "%", True),
+    StepTemplate("S-BLEND-03", "Blending", "Lubrication", "Add magnesium stearate", "Lubrication time", "min", False),
+    StepTemplate("S-ENC-01", "Encapsulation", "Capsule filling", "Set up encapsulator", "Room relative humidity", "%RH", False),
+    StepTemplate("S-ENC-02", "Encapsulation", "Capsule filling", "In-process check", "Capsule fill weight", "mg", True),
+    StepTemplate("S-ENC-03", "Encapsulation", "Polishing", "Polish and inspect", "Yield after inspection", "%", False),
+    _LINE_CLEARANCE,
+    StepTemplate("S-PACK-02", "Packaging", "Bottle filling", "Check count", "Capsules per bottle", "count", True),
+)  # fmt: skip
+
 
 # --- Approved products ----------------------------------------------------------
 
@@ -170,5 +184,26 @@ SYN500 = ProductConfig(
         "S-COAT-01": ("55", "65"),
         "S-COAT-02": ("2.5", "3.5"),
         "S-PACK-02": ("99.5", "100.5"),
+    },
+)
+
+PLC250 = ProductConfig(
+    master_record_id="MBR-PLC250",
+    master_version="1",
+    product_name="Placeprol 250 mg hard capsules",
+    batch_size="200000",
+    batch_size_unit="capsules",
+    excipient="lactose",
+    process=CAPSULE_PROCESS,
+    limits={
+        "S-DISP-01": ("49.75", "50.25"),
+        "S-DISP-02": ("19.90", "20.10"),
+        "S-BLEND-01": ("15", "20"),
+        "S-BLEND-02": ("", "3.0"),  # max only
+        "S-BLEND-03": ("2", "4"),
+        "S-ENC-01": ("35", "55"),
+        "S-ENC-02": ("300", "330"),
+        "S-ENC-03": ("98.0", ""),  # min only
+        "S-PACK-02": ("30", "30"),  # exact count (inclusive limits)
     },
 )

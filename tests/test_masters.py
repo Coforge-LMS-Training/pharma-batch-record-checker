@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from pharma_batch_record_checker.masters import (
+    PLC250,
     SYN500,
     ProductConfig,
     StepTemplate,
@@ -229,3 +230,66 @@ def test_syn500_excipient_phase():
     """The excipient dispensing phase names the tablet's excipient."""
     row = row_by_step(build_master(SYN500), "S-DISP-02")
     assert row.phase == "Weigh microcrystalline cellulose"
+
+
+# --- Slice 3: capsule process and MBR-PLC250 v1 -----------------------------
+
+
+def test_plc250_has_10_steps():
+    """The approved capsule master has exactly 10 steps, numbered 1..10."""
+    assert [r.step_seq for r in build_master(PLC250)] == list(range(1, 11))
+
+
+def test_plc250_identity():
+    """Every PLC250 row carries the approved id, version, product and batch size."""
+    for row in build_master(PLC250):
+        out = row.to_csv_row()
+        assert (
+            out["master_record_id"],
+            out["master_version"],
+            out["product_name"],
+            out["batch_size"],
+            out["batch_size_unit"],
+        ) == ("MBR-PLC250", "1", "Placeprol 250 mg hard capsules", "200000", "capsules")
+
+
+def test_plc250_unit_procedures_in_process_order():
+    """Capsule route: dispense, blend, encapsulate, pack."""
+    assert unit_procedures_in_order(build_master(PLC250)) == [
+        "Dispensing",
+        "Blending",
+        "Encapsulation",
+        "Packaging",
+    ]
+
+
+def test_plc250_step_ids_unique():
+    """step_id identifies a step within the master (it is part of the join key)."""
+    ids = [r.step_id for r in build_master(PLC250)]
+    assert len(ids) == len(set(ids))
+
+
+def test_plc250_one_sided_limits():
+    """Loss on drying is max-only; yield after inspection is min-only."""
+    rows = build_master(PLC250)
+    lod = row_by_step(rows, "S-BLEND-02").to_csv_row()
+    yield_ = row_by_step(rows, "S-ENC-03").to_csv_row()
+    assert (lod["min_value"], lod["max_value"]) == ("", "3.0")
+    assert (yield_["min_value"], yield_["max_value"]) == ("98.0", "")
+
+
+def test_plc250_equal_limits():
+    """Capsules per bottle must be exactly 30 (inclusive limits, min == max)."""
+    out = row_by_step(build_master(PLC250), "S-PACK-02").to_csv_row()
+    assert (out["unit"], out["min_value"], out["max_value"]) == ("count", "30", "30")
+
+
+def test_plc250_sign_off_step():
+    """Line clearance is a critical sign-off-only step in the capsule master too."""
+    out = row_by_step(build_master(PLC250), "S-PACK-01").to_csv_row()
+    assert (out["parameter"], out["unit"], out["critical"]) == ("", "", "Y")
+
+
+def test_plc250_excipient_is_lactose():
+    """The capsule's excipient dispensing phase names lactose."""
+    assert row_by_step(build_master(PLC250), "S-DISP-02").phase == "Weigh lactose"
