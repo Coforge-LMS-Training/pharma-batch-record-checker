@@ -105,3 +105,70 @@ def _build_row(config: ProductConfig, step_seq: int, step: StepTemplate) -> Mast
 def _fill(text: str, config: ProductConfig) -> str:
     """Fill product placeholders such as {excipient} in template text."""
     return text.format(excipient=config.excipient)
+
+
+# --- Process templates --------------------------------------------------------
+# Columns: step_id, unit_procedure, operation, phase, parameter, unit, critical.
+# Steps shared by both dosage forms are defined once.
+
+_WEIGH_API = StepTemplate(
+    "S-DISP-01", "Dispensing", "Weigh raw materials", "Weigh API",
+    "API net weight", "kg", True,
+)  # fmt: skip
+_WEIGH_EXCIPIENT = StepTemplate(
+    "S-DISP-02", "Dispensing", "Weigh raw materials", "Weigh {excipient}",
+    "Excipient net weight", "kg", False,
+)  # fmt: skip
+_LINE_CLEARANCE = StepTemplate(
+    "S-PACK-01", "Packaging", "Line setup", "Line clearance", None, None, True,
+)  # fmt: skip
+
+# Film-coated tablet, wet-granulation route (16 steps).
+TABLET_PROCESS: tuple[StepTemplate, ...] = (
+    _WEIGH_API,
+    _WEIGH_EXCIPIENT,
+    StepTemplate("S-GRAN-01", "Granulation", "Wet granulation", "Add granulating water", "Water added", "L", False),
+    StepTemplate("S-GRAN-02", "Granulation", "Wet granulation", "Granulate", "Impeller speed", "rpm", False),
+    StepTemplate("S-GRAN-03", "Granulation", "Wet granulation", "Granulate", "Granulation time", "min", False),
+    StepTemplate("S-GRAN-04", "Granulation", "Fluid bed drying", "Dry granules", "Inlet air temperature", "degC", False),
+    StepTemplate("S-GRAN-05", "Granulation", "Fluid bed drying", "Check dryness", "Loss on drying", "%", True),
+    StepTemplate("S-BLEND-01", "Blending", "Final blend", "Blend", "Blend time", "min", False),
+    StepTemplate("S-BLEND-02", "Blending", "Final blend", "Blend", "Blender speed", "rpm", False),
+    StepTemplate("S-COMP-01", "Compression", "Tablet compression", "In-process check", "Tablet weight", "mg", True),
+    StepTemplate("S-COMP-02", "Compression", "Tablet compression", "In-process check", "Tablet hardness", "kP", True),
+    StepTemplate("S-COMP-03", "Compression", "Tablet compression", "In-process check", "Tablet thickness", "mm", False),
+    StepTemplate("S-COAT-01", "Coating", "Film coating", "Spray coat", "Inlet air temperature", "degC", False),
+    StepTemplate("S-COAT-02", "Coating", "Film coating", "Check coat", "Coating weight gain", "%", True),
+    _LINE_CLEARANCE,
+    StepTemplate("S-PACK-02", "Packaging", "Blister packaging", "Check label", "Label count reconciliation", "%", False),
+)  # fmt: skip
+
+
+# --- Approved products ----------------------------------------------------------
+
+SYN500 = ProductConfig(
+    master_record_id="MBR-SYN500",
+    master_version="3",
+    product_name="Synthetol 500 mg film-coated tablets",
+    batch_size="300000",
+    batch_size_unit="tablets",
+    excipient="microcrystalline cellulose",
+    process=TABLET_PROCESS,
+    limits={
+        "S-DISP-01": ("149.25", "150.75"),
+        "S-DISP-02": ("29.85", "30.15"),
+        "S-GRAN-01": ("18.0", "20.0"),
+        "S-GRAN-02": ("150", "200"),
+        "S-GRAN-03": ("4", "6"),
+        "S-GRAN-04": ("55", "65"),
+        "S-GRAN-05": ("1.0", "2.5"),
+        "S-BLEND-01": ("10", "15"),
+        "S-BLEND-02": ("8", "12"),
+        "S-COMP-01": ("640", "680"),
+        "S-COMP-02": ("12.0", "18.0"),
+        "S-COMP-03": ("5.8", "6.2"),
+        "S-COAT-01": ("55", "65"),
+        "S-COAT-02": ("2.5", "3.5"),
+        "S-PACK-02": ("99.5", "100.5"),
+    },
+)

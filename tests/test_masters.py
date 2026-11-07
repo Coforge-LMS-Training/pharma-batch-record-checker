@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from pharma_batch_record_checker.masters import (
+    SYN500,
     ProductConfig,
     StepTemplate,
     build_master,
@@ -141,3 +142,90 @@ def test_build_master_rejects_limits_on_sign_off_step():
     }
     with pytest.raises(ValueError, match="S-PACK-01"):
         build_master(tiny_product(limits=limits))
+
+
+# --- Slice 2: tablet process and MBR-SYN500 v3 ------------------------------
+
+
+def unit_procedures_in_order(rows):
+    """Distinct unit procedures in the order they first appear."""
+    return list(dict.fromkeys(r.unit_procedure for r in rows))
+
+
+def row_by_step(rows, step_id):
+    """The single row with the given step_id."""
+    (row,) = [r for r in rows if r.step_id == step_id]
+    return row
+
+
+def test_syn500_has_16_steps():
+    """The approved tablet master has exactly 16 steps, numbered 1..16."""
+    assert [r.step_seq for r in build_master(SYN500)] == list(range(1, 17))
+
+
+def test_syn500_identity():
+    """Every SYN500 row carries the approved id, version, product and batch size."""
+    for row in build_master(SYN500):
+        assert row.to_csv_row()["master_record_id"] == "MBR-SYN500"
+        assert (
+            row.master_version,
+            row.product_name,
+            row.to_csv_row()["batch_size"],
+            row.batch_size_unit,
+        ) == ("3", "Synthetol 500 mg film-coated tablets", "300000", "tablets")
+
+
+def test_syn500_unit_procedures_in_process_order():
+    """Tablet route: dispense, granulate, blend, compress, coat, pack."""
+    assert unit_procedures_in_order(build_master(SYN500)) == [
+        "Dispensing",
+        "Granulation",
+        "Blending",
+        "Compression",
+        "Coating",
+        "Packaging",
+    ]
+
+
+def test_syn500_step_ids_unique():
+    """step_id identifies a step within the master (it is part of the join key)."""
+    ids = [r.step_id for r in build_master(SYN500)]
+    assert len(ids) == len(set(ids))
+
+
+def test_syn500_sign_off_step():
+    """Line clearance is a critical sign-off-only step."""
+    out = row_by_step(build_master(SYN500), "S-PACK-01").to_csv_row()
+    assert (out["parameter"], out["unit"], out["min_value"], out["max_value"]) == (
+        "",
+        "",
+        "",
+        "",
+    )
+    assert out["critical"] == "Y"
+
+
+@pytest.mark.parametrize(
+    ("step_id", "expected"),
+    [
+        ("S-DISP-01", ("API net weight", "kg", "149.25", "150.75", "Y")),
+        ("S-GRAN-05", ("Loss on drying", "%", "1.0", "2.5", "Y")),
+        ("S-DISP-02", ("Excipient net weight", "kg", "29.85", "30.15", "N")),
+    ],
+)
+def test_syn500_spot_rows(step_id, expected):
+    """Selected steps have the approved parameter, unit, limits and critical flag."""
+    out = row_by_step(build_master(SYN500), step_id).to_csv_row()
+    assert (
+        out["parameter"],
+        out["unit"],
+        out["min_value"],
+        out["max_value"],
+        out["critical"],
+    ) == expected
+
+
+def test_syn500_excipient_phase():
+    """The excipient dispensing phase names the tablet's excipient."""
+    row = row_by_step(build_master(SYN500), "S-DISP-02")
+    assert row.phase == "Weigh microcrystalline cellulose"
