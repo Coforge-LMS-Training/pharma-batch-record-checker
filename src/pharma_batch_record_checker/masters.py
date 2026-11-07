@@ -12,7 +12,7 @@ There is no randomness, so the same config always gives the same master.
 All data is synthetic.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -244,9 +244,19 @@ PLC250 = ProductConfig(
 APPROVED_PRODUCTS: tuple[ProductConfig, ...] = (SYN500, PLC250)
 
 
-def build_masters() -> list[MasterRow]:
-    """All approved master rows: MBR-SYN500 v3 (16 steps), then MBR-PLC250 v1 (10)."""
-    return [row for product in APPROVED_PRODUCTS for row in build_master(product)]
+def build_masters(
+    products: Sequence[ProductConfig] = APPROVED_PRODUCTS,
+) -> list[MasterRow]:
+    """Master rows for each product, in order.
+
+    By default these are the approved masters: MBR-SYN500 v3 (16 steps), then
+    MBR-PLC250 v1 (10). Raises ValueError if two products share the same
+    (master_record_id, master_version), which would duplicate the join key.
+    """
+    keys = [f"{p.master_record_id} v{p.master_version}" for p in products]
+    if duplicates := sorted({k for k in keys if keys.count(k) > 1}):
+        raise ValueError(f"duplicate masters {duplicates}")
+    return [row for product in products for row in build_master(product)]
 
 
 def write_masters(dest: Destination) -> None:

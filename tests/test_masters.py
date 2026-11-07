@@ -426,3 +426,21 @@ def test_build_master_keeps_other_braces_literal():
     process = (step(phase="Set {60} rpm for {excipient}"),)
     config = tiny_product(process=process, limits={"S-MIX-02": ("1", "2")})
     assert build_master(config)[0].phase == "Set {60} rpm for starch"
+
+
+# --- Review fix C: no duplicate masters -------------------------------------
+
+
+def test_build_masters_rejects_duplicate_id_and_version():
+    """Two products with the same id and version would clash on the join key."""
+    corrected = dataclasses.replace(SYN500, product_name="Synthetol 500 mg tablets")
+    with pytest.raises(ValueError, match="MBR-SYN500 v3"):
+        build_masters((SYN500, corrected))
+
+
+def test_build_masters_allows_new_version_of_same_master():
+    """A new version of the same master is a different master."""
+    v4 = dataclasses.replace(SYN500, master_version="4")
+    rows = build_masters((SYN500, v4))
+    assert len(rows) == 32
+    assert {r.master_version for r in rows} == {"3", "4"}
