@@ -1,7 +1,9 @@
 """Tests for the master/batch CSV row models (PHA-33). All data is synthetic."""
 
+import ast
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +18,8 @@ from pharma_batch_record_checker.schema import (
     Text,
     check_header,
 )
+
+SRC_PACKAGE_DIR = Path(schema_module.__file__).parent
 
 # Exact client-approved headers, copied verbatim from the issue.
 CLIENT_MASTER_HEADER = (
@@ -549,3 +553,25 @@ def test_deprecated_private_aliases_still_work():
     """
     assert schema_module._CsvRow is CsvRow
     assert schema_module._check_header is check_header
+
+
+def test_no_project_code_uses_deprecated_aliases():
+    """Project code uses the public CsvRow / check_header / write_csv names.
+
+    The deprecated aliases exist only for branches written before the rename;
+    the code on main must not depend on them, so they can be removed later.
+    """
+    deprecated = {"_CsvRow", "_check_header", "_write_csv"}
+    offenders = []
+    for path in sorted(SRC_PACKAGE_DIR.rglob("*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                names = {alias.name for alias in node.names}
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                names = {node.id}
+            else:
+                continue
+            for name in names & deprecated:
+                offenders.append(f"{path.name}:{node.lineno}:{name}")
+    assert offenders == []
