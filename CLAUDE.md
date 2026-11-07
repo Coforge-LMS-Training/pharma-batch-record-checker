@@ -40,8 +40,9 @@ Don't change another owner's contract without their agreement.
 
 ## Tooling
 - uv, Python 3.12, src layout (`src/pharma_batch_record_checker`). The entry point is `pharma_batch_record_checker:main`.
-- Layout: the synthetic data generator lives in `pharma_batch_record_checker/generator/` (owner Sarthak), and its tests are in `tests/generator/`. The shared CSV contract (`schema.py`, `csv_io.py`) stays at the package top level for every owner. The app must not import the generator, and the generator must not import the app (the import guard in `tests/generator/import_guard.py` checks the generator side).
+- Layout: the synthetic data generator lives in `pharma_batch_record_checker/generator/` (owner Sarthak), and its tests are in `tests/generator/`. The shared CSV contract (`schema.py`, `csv_io.py`, including the public `CsvRow`, `check_header` and `write_csv`) stays at the package top level for every owner. The app must not import the generator, and the generator must not import the app. Both directions are tested: `tests/test_app_layout.py` checks the app side, and `tests/generator/test_generator_imports.py` checks every generator module, found automatically, plus that `generator/__init__.py` imports nothing.
 - Tests use pytest and live in `tests/` (`test_*.py`).
 - After every `.py` edit, two hooks run: `ruff check` (`.claude/hooks/ruff-check.sh`), then the full pytest suite (`.claude/hooks/pytest-run.sh`). Lint errors and test failures must be fixed.
-- Commands: `uv sync`, `uv run pharma-batch-record-checker`, `uv add [--dev] <pkg>`, `uv run ruff check . --fix`, `uv run ruff format .`, `uv run pytest`, `uv run pytest tests/test_x.py::test_name` (single test).
+- Commands: `uv sync`, `uv run pharma-batch-record-checker`, `uv add [--dev] <pkg>`, `uv run ruff check . --fix`, `uv run ruff format .`, `uv run pytest`, `uv run pytest tests/test_x.py::test_name` or `uv run pytest tests/generator/test_x.py::test_name` (single test).
+- `tests/` and `tests/generator/` are packages. Import test helpers absolutely, e.g. `from tests.import_guard import disallowed_imports` or `from tests.generator.rule_oracle import rule_violations`. `pyproject.toml` sets the pytest `pythonpath` so this works in any import mode.
 - Use one branch per Linear issue, open PRs into `main`, and keep `main` green.
