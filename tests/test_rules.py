@@ -1,4 +1,4 @@
-"""Tests for the review rules (PHA-62 to PHA-64). All data is synthetic."""
+"""Tests for the review rules (PHA-62 to PHA-65). All data is synthetic."""
 
 import dataclasses
 from datetime import datetime, timedelta
@@ -8,13 +8,14 @@ from types import MappingProxyType
 import pytest
 
 from pharma_batch_record_checker import rules
+from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
 from pharma_batch_record_checker.generator.batches import generate_clean_batch
 from pharma_batch_record_checker.generator.expected_findings import (
     RULE_IDS as GENERATOR_RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import build_masters
 from pharma_batch_record_checker.matching import StepPair, match_batches
-from pharma_batch_record_checker.parser import ParseResult
+from pharma_batch_record_checker.parser import ParseResult, parse_files
 from pharma_batch_record_checker.records import (
     BatchStep,
     MasterKey,
@@ -486,3 +487,91 @@ def test_verifier_without_verification_time_is_missing_second_check():
     assert details_after(tablet, "S-DISP-01", **change) == [
         "Verifier OP-131 recorded but no verification time"
     ]
+
+
+# --- PHA-65: verification timestamp -------------------------------------------------
+
+
+def at(hhmm: str, day: int = 13) -> datetime:
+    """A naive timestamp on 2026-10-<day>."""
+    hour, minute = map(int, hhmm.split(":"))
+    return datetime(2026, 10, day, hour, minute)
+
+
+def blend(performed_at, verified_at) -> dict:
+    """Changes for S-BLEND-01 (non-critical) with a verifier and these times."""
+    return {
+        "performed_at": performed_at,
+        "verified_by": "OP-146",
+        "verified_at": verified_at,
+    }
+
+
+def test_verification_before_performance_gives_one_finding():
+    """S-BLEND-01 performed 10:45, verified 10:30: exactly one finding."""
+    assert not SYN_V3.step("S-BLEND-01").critical
+    change = blend(at("10:45"), at("10:30"))
+    tablet = clean_tablet_batch()
+    assert findings_after(tablet, "S-BLEND-01", **change) == [
+        ("verifier_before_performer", "S-BLEND-01")
+    ]
+    assert details_after(tablet, "S-BLEND-01", **change) == [
+        "Verified 10:30, performed 10:45"
+    ]
+
+
+def test_detail_across_dates_shows_full_timestamps():
+    """Times on different dates are shown in full, so the order is clear."""
+    change = blend(at("00:10", day=13), at("23:50", day=12))
+    assert details_after(clean_tablet_batch(), "S-BLEND-01", **change) == [
+        "Verified 2026-10-12T23:50, performed 2026-10-13T00:10"
+    ]
+
+
+@pytest.mark.parametrize("verified", [at("10:45"), at("10:50")], ids=["equal", "after"])
+def test_equal_or_later_verification_does_not_flag(verified):
+    """Equal times don't flag (pending); verifying afterwards is fine."""
+    change = blend(at("10:45"), verified)
+    assert findings_after(clean_tablet_batch(), "S-BLEND-01", **change) == []
+
+
+@pytest.mark.parametrize(
+    "performed, verified",
+    [(at("10:45"), None), (None, at("10:30"))],
+    ids=["verified_at-blank", "performed_at-blank"],
+)
+def test_missing_timestamp_skips_the_rule(performed, verified):
+    """With either timestamp blank, this rule doesn't run (pending)."""
+    change = blend(performed, verified)
+    found = findings_after(clean_tablet_batch(), "S-BLEND-01", **change)
+    assert "verifier_before_performer" not in [rule for rule, _ in found]
+
+
+def test_malformed_timestamp_is_a_parse_error_not_a_finding(tmp_path):
+    """A malformed verified_at is a ParseError; the batch is blocked, no finding."""
+    placeholder = datetime(2030, 1, 1, 0, 0)  # unique, swapped for the bad text
+    steps = [
+        s.model_copy(update=blend(at("10:45"), placeholder))
+        if s.step_id == "S-BLEND-01"
+        else s
+        for s in clean_tablet_batch()
+    ]
+    master_path, batch_path = tmp_path / "master.csv", tmp_path / "batch.csv"
+    write_master_csv(SYN_ROWS, master_path)
+    write_batch_csv(steps, batch_path)
+    text = batch_path.read_text("utf-8")
+    assert text.count("2030-01-01T00:00") == 1
+    batch_path.write_bytes(
+        text.replace("2030-01-01T00:00", "2026-10-13 10:30").encode("utf-8")
+    )
+
+    parsed = parse_files(master_path, batch_path)
+
+    assert [(e.field, e.raw_value, e.batch_id, e.step_id) for e in parsed.errors] == [
+        ("verified_at", "2026-10-13 10:30", "B26-0413", "S-BLEND-01")
+    ]
+    result = match_batches(parsed)
+    assert [(e.kind, e.batch_id) for e in result.errors] == [
+        ("parse_error", "B26-0413")
+    ]
+    assert [f for b in result.batches.values() for f in batch_findings(b)] == []

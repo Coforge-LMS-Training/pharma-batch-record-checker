@@ -7,7 +7,8 @@ converted. All numbers are Decimal.
 
 Implemented so far: unit_mismatch, missing_reading, out_of_range (PHA-62),
 missing_step, missing_performer (PHA-63), missing_second_check and same_person
-(PHA-64, critical steps only). Severity is decided later (PHA-66), not here.
+(PHA-64, critical steps only) and verifier_before_performer (PHA-65): all 8.
+Severity is decided later (PHA-66), not here.
 
 Unknown or duplicate executed step IDs are never findings: matching.py
 reports them as validation errors and doesn't hand those batches to the rules.
@@ -20,6 +21,7 @@ from typing import Literal, get_args
 
 from pharma_batch_record_checker.matching import MatchedBatch, StepPair
 from pharma_batch_record_checker.records import BatchStep, MasterKey, MasterStep
+from pharma_batch_record_checker.schema import TIMESTAMP_FORMAT
 
 RULE_VERSION = "1.0.0"
 
@@ -97,8 +99,9 @@ def step_findings(
 
     A step with no batch row gives only missing_step. Otherwise the order is
     fixed: unit_mismatch, missing_reading, out_of_range, missing_performer,
-    missing_second_check, same_person. A sign-off-only step (no parameter) has
-    no reading or unit to check; only critical steps get the last two.
+    missing_second_check, same_person, verifier_before_performer. A sign-off-only
+    step (no parameter) has no reading or unit to check; only critical steps get
+    missing_second_check and same_person.
     """
     master, row = pair
 
@@ -132,6 +135,9 @@ def step_findings(
         ):
             detail = f"{row.performed_by} both performed and verified a critical step"
             found.append(finding("same_person", detail))
+    if verified_before_performed(row.performed_at, row.verified_at):
+        detail = _time_order_detail(row.performed_at, row.verified_at)
+        found.append(finding("verifier_before_performer", detail))
     return tuple(found)
 
 
@@ -154,6 +160,34 @@ def second_check_gap(row: BatchStep) -> str | None:
 def same_operator(performed_by: str, verified_by: str | None) -> bool:
     """Whether the performer and verifier are the same operator ID."""
     return performed_by == verified_by
+
+
+# PENDING CLIENT CONFIRMATION (overall plan v1, rule 7):
+# - equal times do not flag: only a verification strictly earlier than the
+#   performance is reported;
+# - if either timestamp is missing, this rule is skipped.
+# Timestamps are compared as parsed (naive, minute precision); no timezone is
+# added or assumed. If the client decides otherwise, change only this function.
+def verified_before_performed(
+    performed_at: datetime | None, verified_at: datetime | None
+) -> bool:
+    """Whether the step was verified strictly before it was performed."""
+    return (
+        performed_at is not None
+        and verified_at is not None
+        and verified_at < performed_at
+    )
+
+
+def _time_order_detail(performed_at: datetime, verified_at: datetime) -> str:
+    """'Verified 10:30, performed 10:45', with full timestamps across dates."""
+    if verified_at.date() == performed_at.date():
+        fmt = "%H:%M"
+    else:
+        fmt = TIMESTAMP_FORMAT
+    return (
+        f"Verified {verified_at.strftime(fmt)}, performed {performed_at.strftime(fmt)}"
+    )
 
 
 def _finding(
