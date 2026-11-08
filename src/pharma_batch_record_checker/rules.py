@@ -5,9 +5,9 @@ never act on the operator comment (it is carried on the finding as data, for
 the reviewer). Units are compared as exact, case-sensitive strings and never
 converted. All numbers are Decimal.
 
-Implemented so far: missing_step, unit_mismatch, missing_reading, out_of_range
-(PHA-62) and missing_performer (PHA-63). Severity is decided later (PHA-66),
-not here.
+Implemented so far: unit_mismatch, missing_reading, out_of_range (PHA-62),
+missing_step, missing_performer (PHA-63), missing_second_check and same_person
+(PHA-64, critical steps only). Severity is decided later (PHA-66), not here.
 
 Unknown or duplicate executed step IDs are never findings: matching.py
 reports them as validation errors and doesn't hand those batches to the rules.
@@ -96,8 +96,9 @@ def step_findings(
     """Every implemented rule's finding for one master step of a batch.
 
     A step with no batch row gives only missing_step. Otherwise the order is
-    fixed: unit_mismatch, missing_reading, out_of_range, missing_performer.
-    A sign-off-only step (no parameter) has no reading or unit to check.
+    fixed: unit_mismatch, missing_reading, out_of_range, missing_performer,
+    missing_second_check, same_person. A sign-off-only step (no parameter) has
+    no reading or unit to check; only critical steps get the last two.
     """
     master, row = pair
 
@@ -122,7 +123,37 @@ def step_findings(
                 found.append(finding("out_of_range", detail))
     if row.performed_by is None:
         found.append(finding("missing_performer", "No performer signature"))
+    if master.critical:
+        gap = second_check_gap(row)
+        if gap is not None:
+            found.append(finding("missing_second_check", gap))
+        elif row.performed_by is not None and same_operator(
+            row.performed_by, row.verified_by
+        ):
+            detail = f"{row.performed_by} both performed and verified a critical step"
+            found.append(finding("same_person", detail))
     return tuple(found)
+
+
+# ASSUMPTION TO CONFIRM (open question 5, overall plan v1, section 12): a
+# critical step has no second check when verified_by OR verified_at is blank
+# (as in the test oracle). With either one missing, same_person is not checked.
+# If the client decides otherwise, change only this function.
+def second_check_gap(row: BatchStep) -> str | None:
+    """Why a step has no complete second check, or None if it has one."""
+    if row.verified_by is None:
+        return "Critical step has no second-person check"
+    if row.verified_at is None:
+        return f"Verifier {row.verified_by} recorded but no verification time"
+    return None
+
+
+# ASSUMPTION TO CONFIRM (with the client): operator IDs are compared exactly
+# as written, with no trimming or case folding, so "op-104" is not "OP-104".
+# If the client says otherwise, change only this function.
+def same_operator(performed_by: str, verified_by: str | None) -> bool:
+    """Whether the performer and verifier are the same operator ID."""
+    return performed_by == verified_by
 
 
 def _finding(

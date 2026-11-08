@@ -1,7 +1,7 @@
-"""Tests for the review rules (PHA-62, PHA-63). All data is synthetic."""
+"""Tests for the review rules (PHA-62 to PHA-64). All data is synthetic."""
 
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 
@@ -240,6 +240,8 @@ def test_rule_ids_match_the_generator():
 
 SYN_ROWS = [r for r in build_masters() if r.master_record_id == "MBR-SYN500"]
 SYN_V3 = MasterVersion.from_rows(SYN_ROWS)
+PLC_ROWS = [r for r in build_masters() if r.master_record_id == "MBR-PLC250"]
+PLC_V1 = MasterVersion.from_rows(PLC_ROWS)
 
 
 def clean_tablet_batch(batch_id="B26-0413") -> list[BatchStep]:
@@ -249,13 +251,13 @@ def clean_tablet_batch(batch_id="B26-0413") -> list[BatchStep]:
 
 
 def match(steps: list[BatchStep]):
-    """Run matching on these batch rows against SYN500 v3."""
+    """Run matching on these batch rows against SYN500 v3 and PLC250 v1."""
     grouped: dict[str, list[BatchStep]] = {}
     for s in steps:
         grouped.setdefault(s.batch_id, []).append(s)
     return match_batches(
         ParseResult(
-            masters=MappingProxyType({SYN_V3.key: SYN_V3}),
+            masters=MappingProxyType({m.key: m for m in (SYN_V3, PLC_V1)}),
             batch_steps=MappingProxyType({b: tuple(s) for b, s in grouped.items()}),
             batch_file="batch.csv",
         )
@@ -372,3 +374,115 @@ def test_unknown_or_duplicate_step_is_a_validation_error_not_a_finding(
         (kind, "B26-0413", extra_step_id)
     ]
     assert [f for b in result.batches.values() for f in batch_findings(b)] == []
+
+
+# --- PHA-64: critical verification ---------------------------------------------------
+
+
+def clean_capsule_batch(batch_id="P26-0202") -> list[BatchStep]:
+    """A clean PLC250 v1 batch from the generator: it breaks none of the 8 rules."""
+    rows = generate_clean_batch(PLC_ROWS, batch_id, datetime(2026, 10, 15, 7, 0), 1)
+    return [BatchStep.from_row(r) for r in rows]
+
+
+def findings_after(steps: list[BatchStep], step_id: str, **update):
+    """(rule_id, step_id) of every finding once one step's values are changed."""
+    changed = [
+        s.model_copy(update=update) if s.step_id == step_id else s for s in steps
+    ]
+    result = match(changed)
+    assert result.errors == ()
+    (batch,) = result.batches.values()
+    return [(f.rule_id, f.step_id) for f in batch_findings(batch)]
+
+
+def details_after(steps: list[BatchStep], step_id: str, **update) -> list[str]:
+    """The detail of every finding once one step's values are changed."""
+    changed = [
+        s.model_copy(update=update) if s.step_id == step_id else s for s in steps
+    ]
+    (batch,) = match(changed).batches.values()
+    return [f.detail for f in batch_findings(batch)]
+
+
+def test_critical_step_without_verifier_is_missing_second_check():
+    """Critical S-DISP-01 with no verifier."""
+    assert SYN_V3.step("S-DISP-01").critical
+    change = {"verified_by": None, "verified_at": None}
+    tablet = clean_tablet_batch()
+    assert findings_after(tablet, "S-DISP-01", **change) == [
+        ("missing_second_check", "S-DISP-01")
+    ]
+    assert details_after(tablet, "S-DISP-01", **change) == [
+        "Critical step has no second-person check"
+    ]
+
+
+@pytest.mark.parametrize(
+    "verifier, expected",
+    [("OP-104", [("same_person", "S-ENC-02")]), ("OP-131", [])],
+)
+def test_same_person_on_critical_step(verifier, expected):
+    """Critical S-ENC-02: OP-104/OP-104 is same_person; OP-104/OP-131 is fine."""
+    assert PLC_V1.step("S-ENC-02").critical
+    found = findings_after(
+        clean_capsule_batch(), "S-ENC-02", performed_by="OP-104", verified_by=verifier
+    )
+    assert found == expected
+
+
+@pytest.mark.parametrize("verifier", [None, "same"], ids=["no-verifier", "same-person"])
+def test_noncritical_step_gets_neither_check(verifier):
+    """S-DISP-02 is not critical: no verifier, or the same person, is fine."""
+    assert not SYN_V3.step("S-DISP-02").critical
+    steps = clean_tablet_batch()
+    row = next(s for s in steps if s.step_id == "S-DISP-02")
+    if verifier is None:
+        change = {"verified_by": None, "verified_at": None}
+    else:
+        change = {
+            "verified_by": row.performed_by,
+            "verified_at": row.performed_at + timedelta(minutes=10),
+        }
+    assert findings_after(steps, "S-DISP-02", **change) == []
+
+
+def test_operator_ids_are_compared_exactly():
+    """'OP-104' vs 'op-104' is not same_person (assumption to confirm)."""
+    found = findings_after(
+        clean_capsule_batch(), "S-ENC-02", performed_by="OP-104", verified_by="op-104"
+    )
+    assert found == []
+
+
+def test_critical_step_with_blank_performer_gives_only_missing_performer():
+    """No performer to compare: missing_performer, and no same_person."""
+    found = findings_after(
+        clean_capsule_batch(), "S-ENC-02", performed_by=None, verified_by="OP-131"
+    )
+    assert found == [("missing_performer", "S-ENC-02")]
+
+
+def test_overlapping_rules_are_separate_findings():
+    """S-COAT-02 3.8 % (max 3.5) checked by its performer: two findings."""
+    assert SYN_V3.step("S-COAT-02").critical
+    found = findings_after(
+        clean_tablet_batch(),
+        "S-COAT-02",
+        reading=Decimal("3.8"),
+        performed_by="OP-117",
+        verified_by="OP-117",
+    )
+    assert found == [("out_of_range", "S-COAT-02"), ("same_person", "S-COAT-02")]
+
+
+def test_verifier_without_verification_time_is_missing_second_check():
+    """verified_by set, verified_at blank: no second check, and no same_person."""
+    change = {"performed_by": "OP-131", "verified_by": "OP-131", "verified_at": None}
+    tablet = clean_tablet_batch()
+    assert findings_after(tablet, "S-DISP-01", **change) == [
+        ("missing_second_check", "S-DISP-01")
+    ]
+    assert details_after(tablet, "S-DISP-01", **change) == [
+        "Verifier OP-131 recorded but no verification time"
+    ]
