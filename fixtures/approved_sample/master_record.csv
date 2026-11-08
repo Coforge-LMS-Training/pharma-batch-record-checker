@@ -1,0 +1,27 @@
+master_record_id,master_version,product_name,batch_size,batch_size_unit,step_seq,step_id,unit_procedure,operation,phase,parameter,unit,min_value,max_value,critical
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,1,S-DISP-01,Dispensing,Weigh raw materials,Weigh API,API net weight,kg,149.25,150.75,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,2,S-DISP-02,Dispensing,Weigh raw materials,Weigh microcrystalline cellulose,Excipient net weight,kg,29.85,30.15,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,3,S-GRAN-01,Granulation,Wet granulation,Add granulating water,Water added,L,18.0,20.0,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,4,S-GRAN-02,Granulation,Wet granulation,Granulate,Impeller speed,rpm,150,200,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,5,S-GRAN-03,Granulation,Wet granulation,Granulate,Granulation time,min,4,6,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,6,S-GRAN-04,Granulation,Fluid bed drying,Dry granules,Inlet air temperature,degC,55,65,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,7,S-GRAN-05,Granulation,Fluid bed drying,Check dryness,Loss on drying,%,1.0,2.5,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,8,S-BLEND-01,Blending,Final blend,Blend,Blend time,min,10,15,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,9,S-BLEND-02,Blending,Final blend,Blend,Blender speed,rpm,8,12,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,10,S-COMP-01,Compression,Tablet compression,In-process check,Tablet weight,mg,640,680,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,11,S-COMP-02,Compression,Tablet compression,In-process check,Tablet hardness,kP,12.0,18.0,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,12,S-COMP-03,Compression,Tablet compression,In-process check,Tablet thickness,mm,5.8,6.2,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,13,S-COAT-01,Coating,Film coating,Spray coat,Inlet air temperature,degC,55,65,N
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,14,S-COAT-02,Coating,Film coating,Check coat,Coating weight gain,%,2.5,3.5,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,15,S-PACK-01,Packaging,Line setup,Line clearance,,,,,Y
+MBR-SYN500,3,Synthetol 500 mg film-coated tablets,300000,tablets,16,S-PACK-02,Packaging,Blister packaging,Check label,Label count reconciliation,%,99.5,100.5,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,1,S-DISP-01,Dispensing,Weigh raw materials,Weigh API,API net weight,kg,49.75,50.25,Y
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,2,S-DISP-02,Dispensing,Weigh raw materials,Weigh lactose,Excipient net weight,kg,19.90,20.10,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,3,S-BLEND-01,Blending,Pre-blend,Blend,Blend time,min,15,20,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,4,S-BLEND-02,Blending,Pre-blend,Check dryness,Loss on drying,%,,3.0,Y
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,5,S-BLEND-03,Blending,Lubrication,Add magnesium stearate,Lubrication time,min,2,4,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,6,S-ENC-01,Encapsulation,Capsule filling,Set up encapsulator,Room relative humidity,%RH,35,55,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,7,S-ENC-02,Encapsulation,Capsule filling,In-process check,Capsule fill weight,mg,300,330,Y
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,8,S-ENC-03,Encapsulation,Polishing,Polish and inspect,Yield after inspection,%,98.0,,N
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,9,S-PACK-01,Packaging,Line setup,Line clearance,,,,,Y
+MBR-PLC250,1,Placeprol 250 mg hard capsules,200000,capsules,10,S-PACK-02,Packaging,Bottle filling,Check count,Capsules per bottle,count,30,30,Y
