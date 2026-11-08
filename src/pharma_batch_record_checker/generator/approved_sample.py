@@ -13,22 +13,18 @@ The committed copy lives in fixtures/approved_sample/ and is regenerated with
 `write_approved_sample("fixtures/approved_sample")`; never edit it by hand.
 """
 
-import os
-import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
+from pharma_batch_record_checker.generator.dataset_io import (
+    write_dataset,
+)
 from pharma_batch_record_checker.generator.defects import (
     INSTRUCTION_COMMENTS,
     BatchPlan,
     Dataset,
     Defect,
     build_dataset,
-)
-from pharma_batch_record_checker.generator.expected_findings import (
-    write_expected_findings,
 )
 from pharma_batch_record_checker.generator.masters import PLC250, SYN500
 
@@ -70,10 +66,6 @@ APPROVED_SAMPLE_PLANS: tuple[BatchPlan, ...] = (
     ),
 )
 
-MASTER_FILE = "master_record.csv"
-BATCH_FILE = "batch_record.csv"
-EXPECTED_FILE = "expected_findings.csv"
-
 
 def build_approved_sample() -> Dataset:
     """Masters, the four approved sample batches and their expected findings."""
@@ -81,23 +73,9 @@ def build_approved_sample() -> Dataset:
 
 
 def write_approved_sample(out_dir: str | Path) -> None:
-    """Write master_record.csv, batch_record.csv and expected_findings.csv to out_dir.
+    """Write the approved sample's three CSV files to out_dir, as one set.
 
-    The three files are a set: they are all written to a staging folder next to
-    out_dir first, and only then moved into place (each move is atomic). If
-    building or writing fails, out_dir keeps its previous files untouched, so
-    batches can't end up next to stale expected findings. The folder is created
-    if needed, and the staging folder is always removed.
+    See dataset_io.write_dataset: the files are staged and replaced together,
+    so a failure leaves the previous fixtures untouched.
     """
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    sample = build_approved_sample()
-    staging = Path(tempfile.mkdtemp(dir=out.parent, prefix=f".{out.name}-"))
-    try:
-        write_master_csv(sample.masters, staging / MASTER_FILE)
-        write_batch_csv(sample.batches, staging / BATCH_FILE)
-        write_expected_findings(sample.findings, staging / EXPECTED_FILE)
-        for name in (MASTER_FILE, BATCH_FILE, EXPECTED_FILE):
-            os.replace(staging / name, out / name)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    write_dataset(build_approved_sample(), out_dir)

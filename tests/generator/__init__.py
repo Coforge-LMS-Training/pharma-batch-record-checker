@@ -9,4 +9,6 @@ KNOWN_GENERATOR_MODULES: tuple[str, ...] = (
     "defects",
     "expected_findings",
     "approved_sample",
+    "dataset_io",
+    "cli",
 )
