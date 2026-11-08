@@ -1,13 +1,21 @@
 """The seeded generator command, generate-batch-records (PHA-38)."""
 
 import csv
+import dataclasses
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
-from pharma_batch_record_checker.generator.cli import main, plan_batches
+import pharma_batch_record_checker.generator.cli as cli_module
+from pharma_batch_record_checker.generator.cli import (
+    MAX_BATCHES,
+    PRODUCT_LINES,
+    ProductLine,
+    main,
+    plan_batches,
+)
 from pharma_batch_record_checker.generator.dataset_io import (
     BATCH_FILE,
     EXPECTED_FILE,
@@ -18,6 +26,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
     EXPECTED_FINDINGS_HEADER,
     RULE_IDS,
 )
+from pharma_batch_record_checker.generator.masters import SYN500
 from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
 
 # --- Planning N batches -------------------------------------------------------
@@ -74,9 +83,9 @@ def test_start_times_are_deterministic():
     }
 
 
-@pytest.mark.parametrize("n", [0, -1, 10000])
+@pytest.mark.parametrize("n", [0, -1, MAX_BATCHES + 1])
 def test_rejects_n_outside_range(n):
-    """N must be 1 to 9999 (batch IDs have four digits per product)."""
+    """N must be 1 to MAX_BATCHES (so every batch starts in 2026)."""
     with pytest.raises(ValueError, match="batches"):
         plan_batches(n)
 
@@ -177,7 +186,7 @@ def test_out_is_required(capsys):
 
 @pytest.mark.parametrize("bad", ["0", "-3", "10000", "x"])
 def test_rejects_bad_batches(bad, tmp_path, capsys):
-    """--batches must be a whole number from 1 to 9999; otherwise a usage error."""
+    """--batches must be a whole number from 1 to MAX_BATCHES; else a usage error."""
     with pytest.raises(SystemExit) as excinfo:
         run(tmp_path, "--batches", bad)
     assert excinfo.value.code == 2
@@ -203,3 +212,55 @@ def test_runs_as_module_byte_identical_twice(tmp_path):
             capture_output=True,
         )
     assert files_of(tmp_path / "a") == files_of(tmp_path / "b")
+
+
+# --- Review follow-ups ---------------------------------------------------------
+
+
+def test_batch_ids_use_product_line_prefix():
+    """Each product line declares its batch-ID prefix explicitly."""
+    assert [(line.product.master_record_id, line.prefix) for line in PRODUCT_LINES] == [
+        ("MBR-SYN500", "B26"),
+        ("MBR-PLC250", "P26"),
+    ]
+
+
+def test_product_without_defect_plan_gets_clean_batches(monkeypatch):
+    """A product line with no defect plan only produces clean batches."""
+    other = dataclasses.replace(SYN500, master_record_id="MBR-TST100")
+    monkeypatch.setattr(
+        cli_module, "PRODUCT_LINES", (ProductLine(other, "T26", defect_plan=None),)
+    )
+    plans = plan_batches(4)
+    assert [p.batch_id for p in plans] == [
+        "T26-0001",
+        "T26-0002",
+        "T26-0003",
+        "T26-0004",
+    ]
+    assert not any(p.defects for p in plans)
+
+
+def test_three_batches_are_the_minimum_for_all_eight_rules():
+    """B26-0002 carries the full tablet defect plan, so N=3 already covers all 8."""
+    assert {f.rule_id for f in build_dataset(0, plan_batches(3)).findings} == set(
+        RULE_IDS
+    )
+    assert build_dataset(0, plan_batches(2)).findings == []
+
+
+def test_all_start_dates_stay_in_2026():
+    """Even at the maximum, every batch starts in 2026, matching the '26' in its ID."""
+    plans = plan_batches(MAX_BATCHES)
+    assert {p.start.year for p in plans} == {2026}
+    assert max(p.start for p in plans).date() == date(2026, 12, 31)
+
+
+def test_unwritable_out_reports_error(tmp_path, capsys):
+    """A filesystem problem gives a one-line error and exit code 1, not a traceback."""
+    blocker = tmp_path / "not_a_folder"
+    blocker.write_text("x")
+    assert main(["--out", str(blocker)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("generate-batch-records: error: cannot write to ")
+    assert "Traceback" not in err
