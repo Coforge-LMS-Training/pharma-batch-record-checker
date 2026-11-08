@@ -1,5 +1,7 @@
 """Writing a generated dataset as a set of three CSV files (PHA-38 / PHA-40)."""
 
+from pathlib import Path
+
 import pytest
 
 import pharma_batch_record_checker.generator.dataset_io as dataset_io_module
@@ -67,3 +69,42 @@ def test_failed_write_keeps_previous_set(tmp_path, monkeypatch):
         write_dataset(build_dataset(0), out)
     assert files_of(out) == old
     assert sorted(p.name for p in tmp_path.iterdir()) == ["data"]
+
+
+def test_stages_inside_out_dir(tmp_path, monkeypatch):
+    """Staging happens inside --out (same filesystem, no access to its parent needed)."""
+    used = []
+    real = dataset_io_module.tempfile.mkdtemp
+
+    def spy(*args, **kwargs):
+        """Record where the staging folder is created."""
+        used.append(Path(kwargs["dir"]))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(dataset_io_module.tempfile, "mkdtemp", spy)
+    out = tmp_path / "data"
+    write_dataset(build_dataset(0), out)
+    assert used == [out]
+    assert sorted(p.name for p in out.iterdir()) == sorted(HEADERS)
+
+
+def test_failed_move_restores_previous_set(tmp_path, monkeypatch):
+    """If moving a new file into place fails, the previous files are restored."""
+    out = tmp_path / "data"
+    out.mkdir()
+    old = {name: f"old {name}\r\n".encode() for name in HEADERS}
+    for name, data in old.items():
+        (out / name).write_bytes(data)
+    real = dataset_io_module.os.replace
+
+    def flaky(src, dst):
+        """Fail when the new expected_findings.csv is moved into place."""
+        if Path(dst) == out / EXPECTED_FILE and ".old" not in str(src):
+            raise PermissionError("locked")
+        return real(src, dst)
+
+    monkeypatch.setattr(dataset_io_module.os, "replace", flaky)
+    with pytest.raises(PermissionError, match="locked"):
+        write_dataset(build_dataset(0), out)
+    assert files_of(out) == old
+    assert sorted(p.name for p in out.iterdir()) == sorted(HEADERS)
