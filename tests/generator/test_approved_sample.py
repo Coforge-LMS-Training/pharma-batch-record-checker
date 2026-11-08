@@ -6,6 +6,7 @@ sample/ is never read here.
 """
 
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,8 @@ def findings_of(batch_id):
 
 def master_of(batch_id):
     """The master rows a sample batch executes."""
-    key = (rows_of(batch_id)[0].master_record_id, rows_of(batch_id)[0].master_version)
+    first = rows_of(batch_id)[0]
+    key = (first.master_record_id, first.master_version)
     return [m for m in SAMPLE.masters if (m.master_record_id, m.master_version) == key]
 
 
@@ -81,10 +83,9 @@ def test_four_named_batches_present():
 
 def test_masters_are_the_approved_ones():
     """Synthetol MBR-SYN500 v3 (16 steps) and Placeprol MBR-PLC250 v1 (10 steps)."""
-    by_master = {}
-    for m in SAMPLE.masters:
-        by_master.setdefault((m.master_record_id, m.master_version, m.product_name), 0)
-        by_master[(m.master_record_id, m.master_version, m.product_name)] += 1
+    by_master = Counter(
+        (m.master_record_id, m.master_version, m.product_name) for m in SAMPLE.masters
+    )
     assert by_master == {
         ("MBR-SYN500", "3", "Synthetol 500 mg film-coated tablets"): 16,
         ("MBR-PLC250", "1", "Placeprol 250 mg hard capsules"): 10,
@@ -165,14 +166,29 @@ def test_fixture_files_have_exact_headers(name, header):
     """Each committed file starts with its exact header and uses CRLF only."""
     data = (FIXTURE_DIR / name).read_bytes()
     assert data.split(b"\r\n")[0].decode("utf-8") == header
-    assert data.count(b"\n") == data.count(b"\r\n")
+    assert is_crlf_only(data)
+
+
+def is_crlf_only(data: bytes) -> bool:
+    """True if every line, including the last, ends with CRLF (no bare CR or LF)."""
+    body = data.replace(b"\r\n", b"")
+    return data.endswith(b"\r\n") and b"\r" not in body and b"\n" not in body
+
+
+@pytest.fixture(scope="module")
+def generated_sample_dir(tmp_path_factory):
+    """The approved sample written once by the generator, for the drift checks."""
+    out = tmp_path_factory.mktemp("approved_sample")
+    write_approved_sample(out)
+    return out
 
 
 @pytest.mark.parametrize("name", list(FIXTURE_HEADERS))
-def test_committed_fixtures_match_generator(name, tmp_path):
+def test_committed_fixtures_match_generator(name, generated_sample_dir):
     """The committed files are exactly what the generator writes (no drift)."""
-    write_approved_sample(tmp_path)
-    assert (FIXTURE_DIR / name).read_bytes() == (tmp_path / name).read_bytes()
+    assert (FIXTURE_DIR / name).read_bytes() == (
+        generated_sample_dir / name
+    ).read_bytes()
 
 
 # --- Writing the set ---------------------------------------------------------
@@ -202,3 +218,17 @@ def test_write_creates_missing_out_dir(tmp_path):
     out = tmp_path / "a" / "b" / "approved_sample"
     write_approved_sample(out)
     assert sorted(p.name for p in out.iterdir()) == sorted(FIXTURE_HEADERS)
+
+
+@pytest.mark.parametrize(
+    ("data", "ok"),
+    [
+        pytest.param(b"a\r\nb\r\n", True, id="crlf"),
+        pytest.param(b"a\rb\r\n", False, id="bare_cr"),
+        pytest.param(b"a\nb\r\n", False, id="bare_lf"),
+        pytest.param(b"a\r\nb", False, id="no_final_crlf"),
+    ],
+)
+def test_is_crlf_only(data, ok):
+    """Every line, including the last, ends with CRLF; no bare CR or LF."""
+    assert is_crlf_only(data) is ok
