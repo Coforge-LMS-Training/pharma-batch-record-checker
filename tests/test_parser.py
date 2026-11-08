@@ -84,6 +84,7 @@ def test_generated_dataset_round_trips_with_no_errors(tmp_path, seed):
     result = parse_files(master_path, batch_path)
 
     assert result.errors == ()
+    assert result.batch_file == str(batch_path)
     expected_masters: dict[MasterKey, list] = {}
     for row in data.masters:
         key = MasterKey(row.master_record_id, row.master_version)

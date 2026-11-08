@@ -71,6 +71,8 @@ class ParseResult:
 
     masters holds only fully valid master versions. batch_steps holds every
     valid batch row, grouped by batch_id in file order, duplicates included.
+    batch_file is the batch file's path (as in ParseError.file), or None if
+    no batch file was parsed, so errors from that file can be told apart.
     """
 
     masters: Mapping[MasterKey, MasterVersion] = field(
@@ -80,6 +82,7 @@ class ParseResult:
         default_factory=lambda: MappingProxyType({})
     )
     errors: tuple[ParseError, ...] = ()
+    batch_file: str | None = None
 
 
 def parse_files(master_path: Source, batch_path: Source) -> ParseResult:
@@ -90,6 +93,7 @@ def parse_files(master_path: Source, batch_path: Source) -> ParseResult:
         masters=masters.masters,
         batch_steps=batches.batch_steps,
         errors=masters.errors + batches.errors,
+        batch_file=batches.batch_file,
     )
 
 
@@ -177,6 +181,7 @@ def parse_batch_csv(path: Source) -> ParseResult:
     return ParseResult(
         batch_steps=MappingProxyType({b: tuple(s) for b, s in steps.items()}),
         errors=tuple(errors),
+        batch_file=name,
     )
 
 
