@@ -1,19 +1,25 @@
 """Review rules (rule_version 1.0.0), applied to matched step pairs.
 
 Each broken rule is its own `Finding`. Rules only read a step's values and
-never act on, or even read, the operator comment. Units are compared as exact,
-case-sensitive strings and never converted. All numbers are Decimal.
+never act on the operator comment (it is carried on the finding as data, for
+the reviewer). Units are compared as exact, case-sensitive strings and never
+converted. All numbers are Decimal.
 
-Implemented so far (PHA-62): unit_mismatch, missing_reading, out_of_range.
-Severity is decided later (PHA-66), not here.
+Implemented so far: missing_step, unit_mismatch, missing_reading, out_of_range
+(PHA-62) and missing_performer (PHA-63). Severity is decided later (PHA-66),
+not here.
+
+Unknown or duplicate executed step IDs are never findings: matching.py
+reports them as validation errors and doesn't hand those batches to the rules.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, get_args
 
-from pharma_batch_record_checker.matching import StepPair
-from pharma_batch_record_checker.records import MasterStep
+from pharma_batch_record_checker.matching import MatchedBatch, StepPair
+from pharma_batch_record_checker.records import BatchStep, MasterKey, MasterStep
 
 RULE_VERSION = "1.0.0"
 
@@ -38,41 +44,120 @@ RULE_IDS: tuple[str, ...] = get_args(RuleId)
 SKIP_RANGE_ON_UNIT_MISMATCH = True
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Finding:
-    """One broken rule on one step of one batch."""
+    """One broken rule on one step of one batch, with a snapshot of the step.
+
+    Every finding has the same shape. The master snapshot is always filled.
+    The batch snapshot is the batch row's values, all None for missing_step.
+    Snapshot names are the client CSV column names; `unit` is in both CSVs,
+    so it is master_unit and batch_unit here. Values keep their parsed types.
+    """
 
     rule_id: RuleId
     batch_id: str
     step_id: str
     detail: str
+    # Master snapshot.
+    master_record_id: str
+    master_version: str
+    step_seq: int
+    unit_procedure: str
+    operation: str
+    phase: str
+    parameter: str | None
+    master_unit: str | None
+    min_value: Decimal | None
+    max_value: Decimal | None
+    critical: bool
+    # Batch snapshot (all None when the step has no batch row).
+    reading: Decimal | None
+    batch_unit: str | None
+    performed_by: str | None
+    performed_at: datetime | None
+    verified_by: str | None
+    verified_at: datetime | None
+    comment: str | None
 
 
-def step_findings(batch_id: str, pair: StepPair) -> tuple[Finding, ...]:
-    """Every implemented rule's finding for one matched step.
+def batch_findings(batch: MatchedBatch) -> tuple[Finding, ...]:
+    """Every finding for a matched batch, step by step in step_seq order."""
+    key = batch.master.key
+    return tuple(
+        finding
+        for pair in batch.pairs
+        for finding in step_findings(batch.batch_id, key, pair)
+    )
 
-    Order is fixed: unit_mismatch, missing_reading, out_of_range. A step
-    absent from the batch gives nothing here (missing_step is separate). A
-    sign-off-only step (no parameter) has no reading or unit to check.
+
+def step_findings(
+    batch_id: str, master_key: MasterKey, pair: StepPair
+) -> tuple[Finding, ...]:
+    """Every implemented rule's finding for one master step of a batch.
+
+    A step with no batch row gives only missing_step. Otherwise the order is
+    fixed: unit_mismatch, missing_reading, out_of_range, missing_performer.
+    A sign-off-only step (no parameter) has no reading or unit to check.
     """
     master, row = pair
-    if row is None or master.parameter is None:
-        return ()
 
     def finding(rule_id: RuleId, detail: str) -> Finding:
-        return Finding(rule_id, batch_id, master.step_id, detail)
+        return _finding(rule_id, batch_id, master_key, master, row, detail)
+
+    if row is None:
+        detail = f"{master.step_id} ({master.phase}) has no row in the batch record"
+        return (finding("missing_step", detail),)
 
     found: list[Finding] = []
-    unit_ok = row.unit == master.unit  # exact and case-sensitive; None never matches
-    if not unit_ok:
-        found.append(finding("unit_mismatch", _unit_detail(master, row.unit)))
-    if row.reading is None:
-        found.append(finding("missing_reading", f"{master.parameter}: no reading"))
-    elif unit_ok or not SKIP_RANGE_ON_UNIT_MISMATCH:
-        detail = _range_detail(master, row.reading, row.unit)
-        if detail is not None:
-            found.append(finding("out_of_range", detail))
+    if master.parameter is not None:
+        unit_ok = row.unit == master.unit  # exact, case-sensitive; None never matches
+        if not unit_ok:
+            found.append(finding("unit_mismatch", _unit_detail(master, row.unit)))
+        if row.reading is None:
+            detail = f"{master.parameter}: no reading"
+            found.append(finding("missing_reading", detail))
+        elif unit_ok or not SKIP_RANGE_ON_UNIT_MISMATCH:
+            detail = _range_detail(master, row.reading, row.unit)
+            if detail is not None:
+                found.append(finding("out_of_range", detail))
+    if row.performed_by is None:
+        found.append(finding("missing_performer", "No performer signature"))
     return tuple(found)
+
+
+def _finding(
+    rule_id: RuleId,
+    batch_id: str,
+    master_key: MasterKey,
+    master: MasterStep,
+    row: BatchStep | None,
+    detail: str,
+) -> Finding:
+    """Build a finding with the master snapshot and (if present) the batch one."""
+    return Finding(
+        rule_id=rule_id,
+        batch_id=batch_id,
+        step_id=master.step_id,
+        detail=detail,
+        master_record_id=master_key.master_record_id,
+        master_version=master_key.master_version,
+        step_seq=master.step_seq,
+        unit_procedure=master.unit_procedure,
+        operation=master.operation,
+        phase=master.phase,
+        parameter=master.parameter,
+        master_unit=master.unit,
+        min_value=master.min_value,
+        max_value=master.max_value,
+        critical=master.critical,
+        reading=row.reading if row else None,
+        batch_unit=row.unit if row else None,
+        performed_by=row.performed_by if row else None,
+        performed_at=row.performed_at if row else None,
+        verified_by=row.verified_by if row else None,
+        verified_at=row.verified_at if row else None,
+        comment=row.comment if row else None,
+    )
 
 
 def _unit_detail(master: MasterStep, unit: str | None) -> str:
