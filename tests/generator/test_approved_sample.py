@@ -11,13 +11,15 @@ from pathlib import Path
 
 import pytest
 
-import pharma_batch_record_checker.generator.approved_sample as approved_sample_module
+import pharma_batch_record_checker.generator.dataset_io as dataset_io_module
 from pharma_batch_record_checker.generator.approved_sample import (
+    build_approved_sample,
+    write_approved_sample,
+)
+from pharma_batch_record_checker.generator.dataset_io import (
     BATCH_FILE,
     EXPECTED_FILE,
     MASTER_FILE,
-    build_approved_sample,
-    write_approved_sample,
 )
 from pharma_batch_record_checker.generator.defects import INSTRUCTION_COMMENTS
 from pharma_batch_record_checker.generator.expected_findings import (
@@ -206,7 +208,7 @@ def test_failed_write_keeps_previous_fixture_set(tmp_path, monkeypatch):
         """Stand-in writer that fails after the other files were written."""
         raise OSError("disk full")
 
-    monkeypatch.setattr(approved_sample_module, "write_expected_findings", fail)
+    monkeypatch.setattr(dataset_io_module, "write_expected_findings", fail)
     with pytest.raises(OSError, match="disk full"):
         write_approved_sample(out)
     assert {name: (out / name).read_bytes() for name in old} == old
