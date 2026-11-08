@@ -6,10 +6,16 @@ steps break the same rules as in the client's sample, but every reading and
 operator ID comes from our own seeded generator, so nothing is copied from the
 client's file. Expected findings are recorded while the defects are planted.
 
+The batch IDs and products are the approved synthetic identifiers listed in
+PHA-39 (Synthetol/Placeprol are fictional); no real client data is used.
+
 The committed copy lives in fixtures/approved_sample/ and is regenerated with
 `write_approved_sample("fixtures/approved_sample")`; never edit it by hand.
 """
 
+import os
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -77,11 +83,21 @@ def build_approved_sample() -> Dataset:
 def write_approved_sample(out_dir: str | Path) -> None:
     """Write master_record.csv, batch_record.csv and expected_findings.csv to out_dir.
 
-    The directory is created if needed; the three files are replaced atomically.
+    The three files are a set: they are all written to a staging folder next to
+    out_dir first, and only then moved into place (each move is atomic). If
+    building or writing fails, out_dir keeps its previous files untouched, so
+    batches can't end up next to stale expected findings. The folder is created
+    if needed, and the staging folder is always removed.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     sample = build_approved_sample()
-    write_master_csv(sample.masters, out / MASTER_FILE)
-    write_batch_csv(sample.batches, out / BATCH_FILE)
-    write_expected_findings(sample.findings, out / EXPECTED_FILE)
+    staging = Path(tempfile.mkdtemp(dir=out.parent, prefix=f".{out.name}-"))
+    try:
+        write_master_csv(sample.masters, staging / MASTER_FILE)
+        write_batch_csv(sample.batches, staging / BATCH_FILE)
+        write_expected_findings(sample.findings, staging / EXPECTED_FILE)
+        for name in (MASTER_FILE, BATCH_FILE, EXPECTED_FILE):
+            os.replace(staging / name, out / name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)

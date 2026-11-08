@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import pharma_batch_record_checker.generator.approved_sample as approved_sample_module
 from pharma_batch_record_checker.generator.approved_sample import (
     BATCH_FILE,
     EXPECTED_FILE,
@@ -172,3 +173,32 @@ def test_committed_fixtures_match_generator(name, tmp_path):
     """The committed files are exactly what the generator writes (no drift)."""
     write_approved_sample(tmp_path)
     assert (FIXTURE_DIR / name).read_bytes() == (tmp_path / name).read_bytes()
+
+
+# --- Writing the set ---------------------------------------------------------
+
+
+def test_failed_write_keeps_previous_fixture_set(tmp_path, monkeypatch):
+    """If any file fails to write, the old three files are all left as they were."""
+    out = tmp_path / "approved_sample"
+    out.mkdir()
+    old = {name: f"old {name}\r\n".encode() for name in FIXTURE_HEADERS}
+    for name, data in old.items():
+        (out / name).write_bytes(data)
+
+    def fail(*args, **kwargs):
+        """Stand-in writer that fails after the other files were written."""
+        raise OSError("disk full")
+
+    monkeypatch.setattr(approved_sample_module, "write_expected_findings", fail)
+    with pytest.raises(OSError, match="disk full"):
+        write_approved_sample(out)
+    assert {name: (out / name).read_bytes() for name in old} == old
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["approved_sample"]
+
+
+def test_write_creates_missing_out_dir(tmp_path):
+    """A nested output folder that doesn't exist yet is created."""
+    out = tmp_path / "a" / "b" / "approved_sample"
+    write_approved_sample(out)
+    assert sorted(p.name for p in out.iterdir()) == sorted(FIXTURE_HEADERS)
