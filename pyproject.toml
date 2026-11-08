@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 pharma-batch-record-checker = "pharma_batch_record_checker:main"
+generate-batch-records = "pharma_batch_record_checker.generator.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
