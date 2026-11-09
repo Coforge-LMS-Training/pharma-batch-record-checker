@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: pharma
+      POSTGRES_USER: pharma_admin
+      POSTGRES_PASSWORD: pharma_admin
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pharma_admin -d pharma"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - pharma_postgres:/var/lib/postgresql/data
+
+volumes:
+  pharma_postgres:
