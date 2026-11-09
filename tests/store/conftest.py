@@ -52,6 +52,7 @@ def admin() -> Iterator[psycopg.Connection]:
         conn.execute(
             """
             TRUNCATE TABLE
+                finding_note,
                 audit_event,
                 finding,
                 review_run,
