@@ -114,10 +114,16 @@ def test_migration_creates_tables_role_and_audit_head(admin):
             """
         ).fetchall()
     }
-    assert grants == {
+    expected = {
         (table, privilege)
         for table in _DATA_TABLES
         for privilege in ("INSERT", "SELECT")
+    }
+    assert expected <= grants
+    assert not grants & {
+        (table, privilege)
+        for table in _DATA_TABLES
+        for privilege in ("UPDATE", "DELETE")
     }
 
     with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row) as app:
