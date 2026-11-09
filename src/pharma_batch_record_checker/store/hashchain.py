@@ -1,4 +1,4 @@
-"""SHA-256 chain over masters, batches, and review runs.
+"""SHA-256 chain over masters, batches, review runs, and notes.
 
 Each insert writes one audit_event in the same transaction as its rows.
 reserve_audit_slot and append_audit_event are owned by pharma_admin, so
@@ -17,8 +17,9 @@ payload_hash, and created_at. Hashes are lowercase hex.
 A master payload is the header plus steps in step_seq order. Its entity id
 is a JSON array of master_record_id and master_version. A batch payload is
 the header plus steps in step_id order, using the C collation. A review
-payload is the run plus findings in finding_seq order. The entity id of a
-batch is its batch_id, and the entity id of a run is its run_id.
+payload is the run plus findings in finding_seq order. A note payload is
+that note alone. The entity id of a batch is its batch_id, of a run its
+run_id, and of a note its note_id.
 
 verify_chain() walks event_seq order and returns the first event whose
 previous-hash link, event hash, or payload hash does not recompute. An
@@ -80,6 +81,7 @@ _BATCH_STEP = (
 )
 _RUN = ("run_id", "batch_id", "rule_version", "result_category", "created_at")
 _FINDING = ("finding_id", "run_id", "finding_seq", *PAYLOAD_FIELDS)
+_NOTE = ("note_id", "finding_id", "reviewer_name", "note_text", "noted_at")
 
 
 @dataclass(frozen=True)
@@ -232,6 +234,8 @@ def _payload(conn: Connection, event_type: str, entity_id: str) -> object | None
         return _batch_payload(conn, entity_id)
     if event_type == REVIEW_RUN:
         return _review_payload(conn, entity_id)
+    if event_type == FINDING_NOTE:
+        return _note_payload(conn, entity_id)
     return None
 
 
@@ -311,6 +315,20 @@ def _review_payload(conn: Connection, entity_id: str) -> dict[str, object] | Non
     payload = _record(_RUN, header)
     payload["findings"] = [_record(_FINDING, finding) for finding in findings]
     return payload
+
+
+def _note_payload(conn: Connection, entity_id: str) -> dict[str, object] | None:
+    row = conn.execute(
+        f"""
+        SELECT {", ".join(_NOTE)}
+        FROM finding_note
+        WHERE note_id = %s
+        """,
+        (entity_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _record(_NOTE, row)
 
 
 def _master_key(entity_id: str) -> tuple[str, str] | None:
