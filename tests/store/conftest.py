@@ -2,7 +2,8 @@
 
 Skipped tests do not connect. When the URLs are set, the session applies
 Alembic migrations with the admin role and each test starts from empty
-master, batch, and review tables. The audit_head row stays.
+data tables. audit_head goes back to event 0 and 64 zero digits, so a
+chain written by one test is not visible to the next.
 """
 
 import os
@@ -37,7 +38,7 @@ def migrated() -> None:
 
 @pytest.fixture
 def admin() -> Iterator[psycopg.Connection]:
-    """Admin connection with master, batch, and review tables truncated."""
+    """Admin connection. Data tables are empty and the chain head is reset."""
     if not database_configured():
         reason = (
             "DATABASE_URL is unset"
@@ -51,12 +52,21 @@ def admin() -> Iterator[psycopg.Connection]:
         conn.execute(
             """
             TRUNCATE TABLE
+                audit_event,
                 finding,
                 review_run,
                 batch_step,
                 batch,
                 master_step,
                 master_record
+            """
+        )
+        conn.execute(
+            """
+            UPDATE audit_head
+            SET last_event_seq = 0,
+                last_event_hash = repeat('0', 64)
+            WHERE id = 1
             """
         )
         conn.commit()
