@@ -2,8 +2,8 @@
 
 Skipped tests do not connect. When the URLs are set, the session applies
 Alembic migrations with the admin role and each test starts from empty
-data tables. audit_head goes back to event 0 and 64 zero digits, so a
-chain written by one test is not visible to the next.
+data tables, including review_problem. audit_head goes back to event 0
+and 64 zero digits, so a chain written by one test is not visible to the next.
 """
 
 import os
@@ -52,6 +52,7 @@ def admin() -> Iterator[psycopg.Connection]:
         conn.execute(
             """
             TRUNCATE TABLE
+                review_problem,
                 finding_note,
                 audit_event,
                 finding,
