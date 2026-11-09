@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Store unavailable · Batch review{% endblock %}
+{% block body %}
+<header class="running-head">
+  <h1>Batch review</h1>
+  <p>Specification index · synthetic</p>
+</header>
+<main id="content">
+  {% if missing_url %}
+  <p class="problem" role="alert">DATABASE_URL is not set. The pages read the store through that URL.</p>
+  {% else %}
+  <p class="problem" role="alert">The store is not reachable. Start Postgres, then run alembic upgrade head.</p>
+  {% endif %}
+</main>
+{% endblock %}

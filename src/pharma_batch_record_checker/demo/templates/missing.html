@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Batch not stored · Batch review{% endblock %}
+{% block body %}
+<header class="running-head">
+  <h1>Batch review</h1>
+  <p>Specification index · synthetic</p>
+</header>
+<main id="content">
+  {% if batch_id %}
+  <p class="problem" role="alert">No batch {{ batch_id }} is stored.</p>
+  {% else %}
+  <p class="problem" role="alert">That finding is not stored.</p>
+  {% endif %}
+  <p><a href="{{ url_for('index') }}">Back to batches</a></p>
+</main>
+{% endblock %}

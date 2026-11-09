@@ -1,0 +1,18 @@
+"""Run the review demo.
+
+The default bind is 127.0.0.1:8000. This command is separate from
+pharma-batch-record-checker, which stays the CLI.
+"""
+
+import argparse
+
+from pharma_batch_record_checker.demo.app import create_app
+
+
+def main() -> None:
+    """Serve the review pages."""
+    parser = argparse.ArgumentParser(description="Review stored synthetic batches.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    create_app().run(host=args.host, port=args.port)

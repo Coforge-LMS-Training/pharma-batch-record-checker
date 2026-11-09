@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ batch.batch_id }} · Batch review{% endblock %}
+{% block body %}
+<header class="running-head">
+  <p class="crumb"><a href="{{ url_for('index') }}">Batches</a></p>
+  <h1>{{ batch.batch_id }}</h1>
+  <p>Synthetic records</p>
+</header>
+<main id="content">
+  <p class="identity">
+    {% if latest %}
+    <span class="result result-{{ latest.result_category|replace(' ', '-')|lower }}">{{ latest.result_category }}</span>
+    {% else %}
+    <span class="result">No review</span>
+    {% endif %}
+    {% if master %}
+    <span>{{ master.product_name }}</span>
+    <span>Master {{ master.master_record_id }} v{{ master.master_version }}</span>
+    <span class="nowrap">Batch size {{ batch_size }} {{ master.batch_size_unit }}</span>
+    {% else %}
+    <span>Master {{ batch.master_record_id }} v{{ batch.master_version }} is not stored.</span>
+    {% endif %}
+    <a href="{{ url_for('export_csv', batch_id=batch.batch_id) }}">Download CSV</a>
+  </p>
+
+  <h2>Runs</h2>
+  {% if runs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Reviewed</th>
+          <th>Rule version</th>
+          <th>Result</th>
+          <th>Latest</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td class="figure lead" data-label="Reviewed">{{ format_store_time(run.created_at) }}</td>
+          <td class="figure" data-label="Rule version">{{ run.rule_version }}</td>
+          <td class="result result-{{ run.result_category|replace(' ', '-')|lower }}" data-label="Result">{{ run.result_category }}</td>
+          <td data-label="Latest">{% if latest and run.run_id == latest.run_id %}yes{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No review is stored for this batch.</p>
+  {% endif %}
+
+  {% if latest %}
+  <h2>Findings</h2>
+  {% if groups %}
+    {% for procedure in groups %}
+    <section class="procedure">
+      <h3>{{ procedure.unit_procedure }}</h3>
+      {% for operation in procedure.operations %}
+      <section class="operation">
+        <h4>{{ operation.operation }}</h4>
+        {% for phase in operation.phases %}
+        <section class="phase">
+          <h5>{{ phase.phase }}</h5>
+          {% for step in phase.steps %}
+          <section class="step" id="step-{{ step.step_id }}">
+            <h6 class="step-id">{{ step.step_id }}</h6>
+            <p class="parameter">{{ step.parameter }}</p>
+            {% for finding in step.findings %}
+            <article class="finding" id="finding-{{ finding.finding_id }}">
+              <div class="finding-head">
+                <p class="rule">{{ finding.rule_id }}</p>
+                <p class="result result-{{ finding.step_severity|replace(' ', '-')|lower }}">{{ finding.step_severity }}</p>
+              </div>
+              <p class="detail">{{ finding.detail }}</p>
+              <dl class="snapshot">
+                <div><dt>Reading</dt><dd>{{ finding.reading }}</dd></div>
+                <div><dt>Recorded unit</dt><dd>{{ finding.recorded_unit }}</dd></div>
+                <div><dt>Expected unit</dt><dd>{{ finding.expected_unit }}</dd></div>
+                <div><dt>Limits</dt><dd>{{ finding.limits }}</dd></div>
+                <div><dt>Performed by</dt><dd>{{ finding.performed_by }}</dd></div>
+                <div><dt>Performed at</dt><dd>{{ finding.performed_at }}</dd></div>
+                <div><dt>Verified by</dt><dd>{{ finding.verified_by }}</dd></div>
+                <div><dt>Verified at</dt><dd>{{ finding.verified_at }}</dd></div>
+                <div><dt>Master critical</dt><dd>{{ finding.master_critical }}</dd></div>
+              </dl>
+              {% if finding.comment is not none %}
+              <div class="comment">
+                <p class="field-label">Comment</p>
+                <p class="comment-text">{{ finding.comment }}</p>
+              </div>
+              {% endif %}
+              <div class="notes">
+                <p class="field-label">Notes</p>
+                {% if finding.notes %}
+                <ol>
+                  {% for note in finding.notes %}
+                  <li>
+                    <p class="note-text">{{ note.note_text }}</p>
+                    <p class="note-by">{{ note.reviewer_name }} · {{ note.noted_at }}</p>
+                  </li>
+                  {% endfor %}
+                </ol>
+                {% else %}
+                <p class="quiet">No notes.</p>
+                {% endif %}
+                {% if note_error and note_finding_id == finding.finding_id %}
+                <p class="problem" role="alert">{{ note_error }}</p>
+                {% endif %}
+                <form class="note-form" method="post" action="{{ url_for('add_note', finding_id=finding.finding_id) }}">
+                  <label>Name
+                    <input name="reviewer_name" autocomplete="name" value="{% if note_finding_id == finding.finding_id %}{{ draft_name }}{% endif %}">
+                  </label>
+                  <label>Note
+                    <textarea name="note_text" rows="3">{% if note_finding_id == finding.finding_id %}{{ draft_text }}{% endif %}</textarea>
+                  </label>
+                  <button type="submit">Add note</button>
+                </form>
+              </div>
+            </article>
+            {% endfor %}
+          </section>
+          {% endfor %}
+        </section>
+        {% endfor %}
+      </section>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  {% else %}
+  <p class="empty">This run has no findings.</p>
+  {% endif %}
+  {% endif %}
+</main>
+{% endblock %}
