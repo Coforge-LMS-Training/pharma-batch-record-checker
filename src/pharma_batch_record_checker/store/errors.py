@@ -23,3 +23,7 @@ class BatchNotFound(StoreError):
 
 class InvalidReview(StoreError):
     """The review run was rejected and nothing was stored."""
+
+
+class FindingNotFound(StoreError):
+    """The note names a finding that is not stored."""
