@@ -1,7 +1,7 @@
 """Persist one review run. This is the store behind handoff.ReviewStore.
 
 The store does not evaluate rules. It writes the payload it is given, or it
-rolls the run back.
+rolls the run back. The run and its hash-chain event commit together.
 """
 
 import uuid
@@ -13,6 +13,7 @@ from pharma_batch_record_checker.review import ResultCategory
 from pharma_batch_record_checker.rules import RULE_IDS
 from pharma_batch_record_checker.store.connection import transaction
 from pharma_batch_record_checker.store.errors import BatchNotFound, InvalidReview
+from pharma_batch_record_checker.store.hashchain import REVIEW_RUN, append_event
 
 _RULE_IDS = frozenset(RULE_IDS)
 _SEVERITIES = frozenset({"Critical", "Needs Review"})
@@ -53,6 +54,7 @@ class PostgresReviewStore:
                 for seq, finding in enumerate(findings):
                     _check_finding(finding, batch_id)
                     _insert_finding(conn, uuid.uuid4(), run_id, seq, finding)
+                append_event(conn, REVIEW_RUN, str(run_id))
         except psycopg.errors.CheckViolation as exc:
             raise InvalidReview("review run was rejected") from exc
         return str(run_id)

@@ -1,8 +1,9 @@
 """Insert one master version or one executed batch.
 
 Rows have already been accepted by schema.MasterRow or schema.BatchRow.
-A failure rolls the whole insert back. A second insert of the same master
-version or batch id raises DuplicateRecord and leaves the first rows in place.
+A failure rolls the whole insert back, including its hash-chain event. A
+second insert of the same master version or batch id raises DuplicateRecord
+and leaves the first rows in place.
 """
 
 from collections.abc import Sequence
@@ -12,6 +13,12 @@ import psycopg
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 from pharma_batch_record_checker.store.connection import transaction
 from pharma_batch_record_checker.store.errors import DuplicateRecord, MasterNotFound
+from pharma_batch_record_checker.store.hashchain import (
+    BATCH_IMPORT,
+    MASTER_IMPORT,
+    append_event,
+    master_entity_id,
+)
 
 
 def insert_master(rows: Sequence[MasterRow]) -> None:
@@ -79,6 +86,11 @@ def insert_master(rows: Sequence[MasterRow]) -> None:
                     f"master {header.master_record_id} v{header.master_version}: "
                     f"duplicate step_id or step_seq {row.step_id!r}"
                 ) from exc
+        append_event(
+            conn,
+            MASTER_IMPORT,
+            master_entity_id(header.master_record_id, header.master_version),
+        )
 
 
 def insert_batch(rows: Sequence[BatchRow]) -> None:
@@ -130,6 +142,7 @@ def insert_batch(rows: Sequence[BatchRow]) -> None:
                 raise ValueError(
                     f"batch {header.batch_id}: duplicate step_id {row.step_id!r}"
                 ) from exc
+        append_event(conn, BATCH_IMPORT, header.batch_id)
 
 
 def _one_master(rows: Sequence[MasterRow]) -> MasterRow:
