@@ -2,19 +2,15 @@
 
 ## Store and review demo
 
-Start Postgres, apply the migrations, and run the tests. Database tests skip when `DATABASE_URL` is unset. The URLs are in `.env.example`.
+From a fresh clone:
 
 ```
-docker compose up -d
-uv run alembic upgrade head
-uv run pytest
+uv sync
 uv run pharma-review-demo
 ```
 
-`pharma-review-demo` listens on `127.0.0.1:8000`. It lists stored batches, opens one batch's findings, appends a note, and downloads that batch's CSV. `pharma-batch-record-checker` stays the CLI.
+That command starts the local Postgres when it is not already running, applies the migrations, loads the approved sample when it is not already stored, and serves http://127.0.0.1:8000. The same command is enough the next time. Docker is required for that local database.
 
-The store writes through `insert_master`, `insert_batch`, `insert_review_run`, and `insert_finding_note`. Load the approved sample with `load_and_review` before opening the demo:
+The pages list stored batches, open one batch's findings, append a note, and download that batch's CSV. `pharma-batch-record-checker` stays the CLI. The store writes through `insert_master`, `insert_batch`, `insert_review_run`, and `insert_finding_note`.
 
-```
-uv run python -c "from pharma_batch_record_checker.store.load import load_and_review; from pharma_batch_record_checker.store.review_store import PostgresReviewStore; load_and_review('fixtures/approved_sample/master_record.csv', 'fixtures/approved_sample/batch_record.csv', PostgresReviewStore())"
-```
+Set `DATABASE_URL` and `DATABASE_ADMIN_URL` first when you are not using the local database. Those URLs are in `.env.example`. `uv run pytest` runs the tests. Database tests skip when `DATABASE_URL` is unset, and they clear the stored rows, so run `uv run pharma-review-demo` again afterward to load the sample.
