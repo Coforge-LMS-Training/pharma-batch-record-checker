@@ -400,6 +400,41 @@ def test_loading_the_same_files_again_raises_duplicate(admin, tmp_path):
     )
 
 
+def test_loading_rejected_files_again_does_not_repeat_problems(admin, tmp_path):
+    """A file pair that stores only problems is refused the second time."""
+    master_path = tmp_path / "master.csv"
+    batch_path = tmp_path / "batch.csv"
+    master_path.write_bytes(
+        b"\xef\xbb\xbf"
+        b"master_record_id,master_version,product_name,batch_size,"
+        b"batch_size_unit,step_seq,step_id,unit_procedure,operation,phase,"
+        b"parameter,unit,min_value,max_value,critical\r\n"
+        b"MBR-EDGE,1,Edge Check,1,kg,1,S-1,Dispensing,Weigh,Weigh,Weight,kg,"
+        b"1,2,Y\r\n"
+    )
+    batch_path.write_text("nope\r\n", encoding="utf-8")
+
+    first = load_and_review(master_path, batch_path, PostgresReviewStore())
+    assert list(first.batches) == []
+    assert len(first.errors) == 3
+    stored = admin.execute("SELECT count(*) AS n FROM review_problem").fetchone()["n"]
+    events = admin.execute("SELECT count(*) AS n FROM audit_event").fetchone()["n"]
+    assert stored == 3
+    assert events == 0
+    assert admin.execute("SELECT count(*) AS n FROM master_record").fetchone()["n"] == 0
+    assert admin.execute("SELECT count(*) AS n FROM batch").fetchone()["n"] == 0
+    admin.rollback()
+
+    with pytest.raises(DuplicateRecord, match="these problems are already stored"):
+        load_and_review(master_path, batch_path, PostgresReviewStore())
+
+    assert (
+        admin.execute("SELECT count(*) AS n FROM review_problem").fetchone()["n"] == 3
+    )
+    assert admin.execute("SELECT count(*) AS n FROM audit_event").fetchone()["n"] == 0
+    assert admin.execute("SELECT count(*) AS n FROM review_run").fetchone()["n"] == 0
+
+
 def test_export_of_b26_0413_includes_the_findings_and_a_note(admin, monkeypatch):
     """B26-0413 exports every finding and the note text, without a new review."""
     load_and_review(MASTER_CSV, BATCH_CSV, PostgresReviewStore())

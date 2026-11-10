@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "files": [
+          ".impeccable/mocks/decision/canon.html"
+        ],
+        "createdAt": "2026-11-09T21:37:41.550Z",
+        "reason": "Canon card shows the category-standard admin face on purpose. It is the quiet exit, not the build."
+      }
+    ]
+  }
+}

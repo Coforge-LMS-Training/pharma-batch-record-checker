@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-09T22:15:00Z",
+  "title": "Design System: Batch review",
+  "extensions": {
+    "colorMeta": {
+      "monograph-indigo": {
+        "role": "primary",
+        "displayName": "Monograph indigo",
+        "canonical": "#12315c",
+        "tonalRamp": ["#071422", "#0c2244", "#12315c", "#1e4a7a", "#3d6a9a", "#7a9bb8", "#d5deea", "#f3f6f8"]
+      },
+      "pressed-indigo": {
+        "role": "primary",
+        "displayName": "Pressed indigo",
+        "canonical": "#0c2244",
+        "tonalRamp": ["#050d18", "#071422", "#0c2244", "#16345c", "#2c5580", "#6d90b0", "#c9d6e4", "#f2f5f8"]
+      },
+      "index-mist": {
+        "role": "neutral",
+        "displayName": "Index mist",
+        "canonical": "#d5deea",
+        "tonalRamp": ["#1a2836", "#314556", "#4d6478", "#6d8496", "#93a8b6", "#b7c6d2", "#d5deea", "#f4f7fa"]
+      },
+      "cool-paper": {
+        "role": "neutral",
+        "displayName": "Cool paper",
+        "canonical": "#f7f8f6",
+        "tonalRamp": ["#1a1c19", "#3a3d38", "#5c6058", "#8a8e86", "#b7bbb4", "#d5d8d4", "#e8ebe6", "#f7f8f6"]
+      },
+      "sheet": {
+        "role": "neutral",
+        "displayName": "Sheet",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#1a1c19", "#3a3d38", "#5c6058", "#8a8e86", "#c5c9c2", "#e4e6e2", "#f7f8f6", "#ffffff"]
+      },
+      "record-ink": {
+        "role": "neutral",
+        "displayName": "Record ink",
+        "canonical": "#1a1c19",
+        "tonalRamp": ["#1a1c19", "#2e312c", "#4a4e48", "#6a6e68", "#8e928c", "#b4b8b2", "#d8dcd6", "#f4f6f2"]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#c5c9c2",
+        "tonalRamp": ["#2a2d28", "#454840", "#646860", "#868a82", "#a8aca4", "#c5c9c2", "#e2e4e0", "#f6f7f5"]
+      },
+      "critical-red": {
+        "role": "secondary",
+        "displayName": "Critical red",
+        "canonical": "#9e2a2b",
+        "tonalRamp": ["#3a1010", "#6b1a1c", "#9e2a2b", "#c45552", "#e08a84", "#f0c2be", "#f8e4e2", "#fdf6f6"]
+      },
+      "review-brown": {
+        "role": "tertiary",
+        "displayName": "Review brown",
+        "canonical": "#6f3d09",
+        "tonalRamp": ["#2a1804", "#4a2808", "#6f3d09", "#8f5520", "#b07840", "#d4a574", "#f0dcc4", "#faf4ec"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The running head." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles such as Runs and Findings." },
+      "title": { "displayName": "Title", "purpose": "A batch id or a step id." },
+      "body": { "displayName": "Body", "purpose": "Findings, comments, and notes." },
+      "label": { "displayName": "Label", "purpose": "Field names and button text." }
+    },
+    "shadows": [
+      {
+        "name": "running-head",
+        "value": "0 10px 24px rgb(18 49 92 / 18%)",
+        "purpose": "The pinned indigo bar only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "underline-draw",
+        "value": "background-size 180ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "A link underline draws in from the left. Reduced motion shows the underline at rest."
+      }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "800px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The action on a filter or a note. Square, indigo, flat.",
+      "html": "<button class=\"ds-btn-primary\">Add note</button>",
+      "css": ".ds-btn-primary { background: #12315c; color: #f7f8f6; border: 0; border-radius: 0; min-height: 2.75rem; padding: 0.5rem 0.9rem; font-family: \"Source Sans 3\", sans-serif; font-size: 0.95rem; font-weight: 600; cursor: pointer; } .ds-btn-primary:hover { background: #0c2244; } .ds-btn-primary:focus-visible { outline: 2px solid #12315c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "text-input",
+      "description": "A name or a note. Square stroke, sheet fill.",
+      "html": "<label class=\"ds-field\">Name <input class=\"ds-input\" value=\"Reviewer A\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 0.3rem; color: #12315c; font-family: \"Source Sans 3\", sans-serif; font-size: 0.95rem; font-weight: 600; } .ds-input { background: #ffffff; color: #1a1c19; border: 1px solid #12315c; border-radius: 0; min-height: 2.75rem; padding: 0.45rem 0.5rem; font: inherit; caret-color: #12315c; } .ds-input:focus-visible { outline: 2px solid #12315c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Running head",
+      "kind": "nav",
+      "refersTo": "running-head",
+      "description": "The pinned indigo bar. The title is the batch id once a batch is open.",
+      "html": "<header class=\"ds-head\"><strong>B26-0413</strong><span>Synthetic records</span></header>",
+      "css": ".ds-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem; min-height: 4.25rem; padding: 0.9rem 1.75rem; background: #12315c; color: #f7f8f6; box-shadow: 0 10px 24px rgb(18 49 92 / 18%); } .ds-head strong { font-family: \"Source Serif 4\", Palatino, serif; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; } .ds-head span { color: #d5deea; font-family: \"Source Sans 3\", sans-serif; font-size: 1.05rem; }"
+    },
+    {
+      "name": "Result word",
+      "kind": "chip",
+      "refersTo": "button-primary",
+      "description": "Severity is a word, not a pill.",
+      "html": "<p class=\"ds-result\"><span class=\"ds-critical\">Critical</span> <span class=\"ds-review\">Needs Review</span> <span class=\"ds-clear\">No Findings</span></p>",
+      "css": ".ds-result { font-family: \"Source Sans 3\", sans-serif; font-size: 1.0625rem; color: #1a1c19; } .ds-critical { color: #9e2a2b; font-weight: 600; } .ds-review { color: #6f3d09; font-weight: 600; } .ds-clear { color: #1a1c19; font-weight: 400; }"
+    },
+    {
+      "name": "Specification row",
+      "kind": "custom",
+      "refersTo": "text-input",
+      "description": "One stored batch. The id is the serif link. The result is a word.",
+      "html": "<div class=\"ds-row\"><a class=\"ds-id\" href=\"#\">B26-0413</a><span>Synthetol 500 mg film-coated tablets</span><span class=\"ds-critical\">Critical</span></div>",
+      "css": ".ds-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0.7rem 0.65rem; background: #ffffff; border-bottom: 1px solid #c5c9c2; font-family: \"Source Sans 3\", sans-serif; color: #1a1c19; } .ds-id { font-family: \"Source Serif 4\", Palatino, serif; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em; color: #1a1c19; text-decoration: none; } .ds-critical { color: #9e2a2b; font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Specification Index",
+    "overview": "The screen is a specification index a reviewer can sit in. A pinned indigo running head names the page, a hairline table carries the records, and the batch id is set in Source Serif 4. Density is the density of a monograph: tight rows, tabular figures, and prose held to a readable measure. The page is light because the work happens at a desk in ordinary office light.\n\nColor does three jobs. The indigo bar is the shell. Critical and Needs Review are words in their own colors, on the paper, never pills. No Findings stays in the same ink as the rest of the row.",
+    "keyCharacteristics": [
+      "A pinned indigo running head, with the batch id in Source Serif 4",
+      "Hairline tables on cool paper, square corners, no sidebar",
+      "Severity is the word itself: Critical, Needs Review, or No Findings",
+      "One motion: a link underline that draws in from the left"
+    ],
+    "rules": [
+      {
+        "name": "The Word Carries the Result Rule",
+        "body": "Critical, Needs Review, and No Findings are colored words. They are not pills, badges, or row fills.",
+        "section": "colors"
+      },
+      {
+        "name": "The Serif Is the Identifier Rule",
+        "body": "Source Serif 4 is for a batch id or a step id. It is not a display face for sentences.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Shadow Rule",
+        "body": "The running head is the only elevated surface. Rows, notes, and buttons stay flat.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the running head pinned and indigo, and set the batch id in Source Serif 4.",
+      "Do show Critical, Needs Review, and No Findings as those words.",
+      "Do keep comments and notes as text, with a readable measure.",
+      "Do use a hairline, not a card, to separate rows."
+    ],
+    "donts": [
+      "Don't add a sidebar, a status pill, or a colored row fill for severity.",
+      "Don't put a second shadow on tables, notes, or buttons.",
+      "Don't round the button or the fields.",
+      "Don't set sentences in Source Serif 4."
+    ]
+  }
+}

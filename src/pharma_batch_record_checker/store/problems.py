@@ -7,6 +7,7 @@ not stored as review runs.
 """
 
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 
 from pharma_batch_record_checker.matching import MatchError
@@ -19,6 +20,38 @@ INSERT INTO review_problem (
     batch_id, step_id, kind
 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+_COUNT_SAME = """
+SELECT count(*)
+FROM review_problem
+WHERE source IS NOT DISTINCT FROM %s
+  AND file IS NOT DISTINCT FROM %s
+  AND "row" IS NOT DISTINCT FROM %s
+  AND field IS NOT DISTINCT FROM %s
+  AND reason IS NOT DISTINCT FROM %s
+  AND raw_value IS NOT DISTINCT FROM %s
+  AND batch_id IS NOT DISTINCT FROM %s
+  AND step_id IS NOT DISTINCT FROM %s
+  AND kind IS NOT DISTINCT FROM %s
+"""
+
+
+def problems_already_stored(errors: Sequence[ParseError | MatchError]) -> bool:
+    """True when every error is already in review_problem.
+
+    An empty sequence is not a duplicate. Repeated copies count, and nulls
+    match nulls. A new error makes the whole sequence new.
+    """
+    rows = tuple(_problem_values(error)[1:] for error in errors)
+    if not rows:
+        return False
+    needed = Counter(rows)
+    with transaction() as conn:
+        for key, count in needed.items():
+            stored = conn.execute(_COUNT_SAME, key).fetchone()
+            if stored[0] < count:
+                return False
+    return True
 
 
 def insert_problems(errors: Sequence[ParseError | MatchError]) -> None:

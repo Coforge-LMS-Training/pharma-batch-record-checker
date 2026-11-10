@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.1",
+    "flask>=3.1.3",
     "psycopg[binary]>=3.3.8",
     "pydantic>=2.14.3",
     "pytest>=9.2.0",
@@ -18,6 +19,7 @@ dependencies = [
 [project.scripts]
 pharma-batch-record-checker = "pharma_batch_record_checker:main"
 generate-batch-records = "pharma_batch_record_checker.generator.cli:main"
+pharma-review-demo = "pharma_batch_record_checker.demo.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
