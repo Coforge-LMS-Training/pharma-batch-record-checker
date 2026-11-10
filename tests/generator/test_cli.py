@@ -19,6 +19,7 @@ from pharma_batch_record_checker.generator.cli import (
     PRODUCT_LINES,
     ProductLine,
     batch_span,
+    batches_for_rules,
     extra_lines,
     main,
     parse_start,
@@ -286,8 +287,9 @@ def test_summary_counts_findings_by_severity_steps_and_rule(tmp_path, capsys):
 def test_summary_names_rules_that_were_not_planted():
     """When some rules have no finding, the summary says which."""
     capsule_defects = plan_batches(4)[3:4]  # P26-0002 only: no missing_reading
-    text = summarize(build_dataset(0, capsule_defects), Path("out"))
-    assert "(not planted: missing_reading)" in text
+    text = summarize(build_dataset(0, capsule_defects), Path("out"), PRODUCT_LINES[1:])
+    assert "not planted: missing_reading" in text
+    assert "no plan in use has: missing_reading" in text
 
 
 def test_summary_explains_a_dataset_without_defects(tmp_path, capsys):
@@ -831,3 +833,112 @@ def test_start_overflowing_2099_is_a_usage_error(extra, tmp_path, capsys):
     assert "2100" in err
     assert "Traceback" not in err
     assert not out.exists()
+
+
+# --- How many batches plant the rules (batches_for_rules) ---------------------
+
+
+def planted_rules(lines, n):
+    """The rules a run of n batches over lines actually plants."""
+    plans = plan_batches(n, lines=lines)
+    return {f.rule_id for f in build_dataset(0, plans).findings}
+
+
+def test_batches_for_rules_with_the_built_in_lines():
+    """B's 2nd batch (overall batch 3) already carries all 8 rules."""
+    assert batches_for_rules(PRODUCT_LINES) == (3, frozenset(RULE_IDS))
+    assert planted_rules(PRODUCT_LINES, 3) == set(RULE_IDS)
+    assert planted_rules(PRODUCT_LINES, 2) == set()
+
+
+def test_batches_for_rules_with_the_catalog_lines():
+    """With B, P and three catalog lines, batch 6 is B26-0002: all 8 rules."""
+    lines = PRODUCT_LINES + extra_lines(load_catalog(CATALOG).products)
+    assert batches_for_rules(lines) == (6, frozenset(RULE_IDS))
+    assert planted_rules(lines, 6) == set(RULE_IDS)
+    assert planted_rules(lines, 5) == set()
+
+
+def test_batches_for_rules_without_any_plan():
+    """Lines with no defect plan can never plant a rule."""
+    assert batches_for_rules((TST_LINE,)) == (None, frozenset())
+
+
+def catalog_copy(tmp_path, keep=None, rename=None, edits=None):
+    """A copy of the catalog: keep only some products, rename files, edit text.
+
+    keep: product file names to keep (None keeps all). rename: {old: new}
+    file names. edits: {file name: (old, new)} text replacements, applied
+    after renaming.
+    """
+    catalog = tmp_path / "catalog"
+    shutil.copytree(CATALOG, catalog)
+    products = catalog / "products"
+    for path in products.glob("*.toml"):
+        if keep is not None and path.name not in keep:
+            path.unlink()
+    for old, new in (rename or {}).items():
+        (products / old).rename(products / new)
+    for name, (old, new) in (edits or {}).items():
+        path = products / name
+        text = path.read_text(encoding="utf-8")
+        assert old in text
+        path.write_text(text.replace(old, new), encoding="utf-8")
+    return catalog
+
+
+def test_summary_says_when_no_line_has_a_plan(tmp_path, capsys):
+    """Only a clean-only product: more batches would never add findings."""
+    catalog = catalog_copy(tmp_path, keep={"mockazole_75mg.toml"})
+    lines = summary_of(
+        tmp_path / "out",
+        capsys,
+        "--batches",
+        "4",
+        "--catalog",
+        str(catalog),
+        "--no-builtin",
+    )
+    assert "  findings: none (no product line has a defect plan)" in lines
+
+
+def test_summary_hint_counts_from_the_first_line_with_a_plan(tmp_path, capsys):
+    """With a clean-only line first, the first defects come one batch later."""
+    catalog = catalog_copy(
+        tmp_path, rename={"mockazole_75mg.toml": "aa_mockazole_75mg.toml"}
+    )
+    lines = summary_of(
+        tmp_path / "out",
+        capsys,
+        "--batches",
+        "3",
+        "--catalog",
+        str(catalog),
+        "--no-builtin",
+    )
+    assert (
+        "  findings: none (a line's defects start at its 2nd batch; "
+        "use --batches 5 or more)"
+    ) in lines
+
+
+def test_summary_names_the_batches_that_plant_every_rule(tmp_path, capsys):
+    """A capsule-plan line first: batch 4 lacks missing_reading, batch 5 adds it."""
+    catalog = catalog_copy(
+        tmp_path,
+        rename={"mockazole_75mg.toml": "aa_mockazole_75mg.toml"},
+        edits={
+            "aa_mockazole_75mg.toml": (
+                'id_letter        = "M"\n',
+                'id_letter        = "M"\ndefect_plan      = "capsule_standard"\n',
+            )
+        },
+    )
+    args = ("--catalog", str(catalog), "--no-builtin")
+    four = summary_of(tmp_path / "four", capsys, "--batches", "4", *args)
+    rules = next(line for line in four if line.startswith("  rules:"))
+    assert rules.endswith(
+        "(not planted: missing_reading; --batches 5 plants every rule your plans cover)"
+    )
+    five = summary_of(tmp_path / "five", capsys, "--batches", "5", *args)
+    assert any(line.endswith("(all 8 planted)") for line in five)

@@ -353,29 +353,55 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def summarize(dataset: Dataset, out: Path, line_count: int | None = None) -> str:
+def batches_for_rules(
+    lines: Sequence[ProductLine],
+) -> tuple[int | None, frozenset[str]]:
+    """How many batches plant every rule the lines' plans cover, and those rules.
+
+    Lines alternate and a line's defects start at its 2nd batch, so line j
+    (0-based) of k first plants its plan at overall batch k + j + 1. Walking
+    the lines in order, the answer is the first such batch at which the plans
+    seen so far cover every rule any line's plan covers. (None, empty) when
+    no line has a defect plan, because then no run ever plants a rule.
+    """
+    covered = frozenset(
+        d.rule_id
+        for line in lines
+        if line.defect_plan
+        for d in line.defect_plan.defects
+    )
+    seen: set[str] = set()
+    for j, line in enumerate(lines):
+        if line.defect_plan is None:
+            continue
+        seen.update(d.rule_id for d in line.defect_plan.defects)
+        if seen == covered:
+            return len(lines) + j + 1, covered
+    return None, covered
+
+
+def summarize(dataset: Dataset, out: Path, lines: Sequence[ProductLine]) -> str:
     """What was written, for people: the first line, then the details.
 
     Lists each product line (letter, master, name, batches, defective
-    batches), findings by severity and by rule (naming rules not planted),
-    the span of timestamps, and the files. line_count is how many product
-    lines the run alternated (default: the masters present); it sizes the
-    --batches hint when no defects were planted. The text depends only on
-    the dataset and out, so the same run always prints the same summary.
+    batches), findings by severity and by rule (naming rules not planted and
+    how many --batches would plant them), the span of timestamps, and the
+    files. lines are the product lines the run alternated, in order. The text
+    depends only on its arguments, so the same run prints the same summary.
     """
     batch_ids = list(dict.fromkeys(row.batch_id for row in dataset.batches))
     first = (
         f"wrote {len(batch_ids)} batches, {len(dataset.findings)} expected "
         f"findings to {out}"
     )
-    lines = [
+    text = [
         first,
         "  products:",
-        *_product_lines(dataset),
-        _findings_line(dataset, line_count),
+        *_product_lines(dataset, lines),
+        _findings_line(dataset, lines),
     ]
     if dataset.findings:
-        lines.append(_rules_line(dataset))
+        text.append(_rules_line(dataset, lines))
     stamps = [
         stamp
         for row in dataset.batches
@@ -383,28 +409,31 @@ def summarize(dataset: Dataset, out: Path, line_count: int | None = None) -> str
         if stamp is not None
     ]
     if stamps:
-        lines.append(
+        text.append(
             f"  time span: {min(stamps):{TIMESTAMP_FORMAT}} to "
             f"{max(stamps):{TIMESTAMP_FORMAT}}"
         )
-    lines.append(f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}")
-    return "\n".join(lines)
+    text.append(f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}")
+    return "\n".join(text)
 
 
-def _product_lines(dataset: Dataset) -> list[str]:
-    """One aligned line per master: letter, id and version, name, batch counts."""
+def _product_lines(dataset: Dataset, lines: Sequence[ProductLine]) -> list[str]:
+    """One aligned row per master: line letter, id and version, name, counts."""
+    letters = {
+        (line.product.master_record_id, line.product.master_version): line.prefix
+        for line in lines
+    }
     names: dict[tuple[str, str], str] = {}
     for row in dataset.masters:
         names.setdefault((row.master_record_id, row.master_version), row.product_name)
-    batches: dict[tuple[str, str], list[str]] = {key: [] for key in names}
+    batches: dict[tuple[str, str], dict[str, None]] = {key: {} for key in names}
     for row in dataset.batches:
-        ids = batches.setdefault((row.master_record_id, row.master_version), [])
-        if row.batch_id not in ids:
-            ids.append(row.batch_id)
+        key = (row.master_record_id, row.master_version)
+        batches.setdefault(key, {})[row.batch_id] = None
     defective = {f.batch_id for f in dataset.findings}
     rows = [
         (
-            ids[0][0] if ids else "?",
+            letters.get((master_id, version), "?"),
             f"{master_id} v{version}",
             names[(master_id, version)],
             (
@@ -422,16 +451,18 @@ def _product_lines(dataset: Dataset) -> list[str]:
     ]
 
 
-def _findings_line(dataset: Dataset, line_count: int | None) -> str:
+def _findings_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
     """Findings by severity and the steps they are on, or why there are none."""
     findings = dataset.findings
     if not findings:
-        lines = line_count or len(
-            {(m.master_record_id, m.master_version) for m in dataset.masters}
+        first = next(
+            (j for j, line in enumerate(lines) if line.defect_plan is not None), None
         )
+        if first is None:
+            return "  findings: none (no product line has a defect plan)"
         return (
             "  findings: none (a line's defects start at its 2nd batch; "
-            f"use --batches {lines + 1} or more)"
+            f"use --batches {len(lines) + first + 1} or more)"
         )
     critical = sum(f.severity == "Critical" for f in findings)
     steps = len({(f.batch_id, f.step_id) for f in findings})
@@ -441,19 +472,22 @@ def _findings_line(dataset: Dataset, line_count: int | None) -> str:
     )
 
 
-def _rules_line(dataset: Dataset) -> str:
-    """Findings per rule in the agreed rule order, and which rules have none."""
+def _rules_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
+    """Findings per rule in rule order, and why any rule has none."""
     counts = {rule: 0 for rule in RULE_IDS}
     for finding in dataset.findings:
         counts[finding.rule_id] += 1
     listed = ", ".join(f"{rule} {n}" for rule, n in counts.items() if n)
     missing = [rule for rule, n in counts.items() if not n]
-    note = (
-        f"all {len(RULE_IDS)} planted"
-        if not missing
-        else f"not planted: {', '.join(missing)}"
-    )
-    return f"  rules: {listed} ({note})"
+    if not missing:
+        return f"  rules: {listed} (all {len(RULE_IDS)} planted)"
+    needed, covered = batches_for_rules(lines)
+    notes = [f"not planted: {', '.join(missing)}"]
+    if needed is not None and any(rule in covered for rule in missing):
+        notes.append(f"--batches {needed} plants every rule your plans cover")
+    if absent := [rule for rule in missing if rule not in covered]:
+        notes.append(f"no plan in use has: {', '.join(absent)}")
+    return f"  rules: {listed} ({'; '.join(notes)})"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -486,7 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    print(summarize(dataset, args.out, len(lines)))
+    print(summarize(dataset, args.out, lines))
     return 0
 
 
