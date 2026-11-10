@@ -6,7 +6,8 @@ Writes master_record.csv, batch_record.csv and expected_findings.csv to --out.
 Each product line runs its batches back to back from --start, and every batch
 ID takes its two-digit year from its start date. --catalog DIR adds extra
 synthetic products from a folder of TOML templates, defect plans and products
-(see catalog.py and catalog/README.md); without it, only SYN500 and PLC250 are
+(see catalog.py and catalog/README.md) after SYN500 and PLC250, or instead of
+them with --no-builtin; without --catalog, only SYN500 and PLC250 are
 generated. The same --seed, --batches, --start and catalog always give
 byte-identical files; --seed changes readings only.
 It needs no rules engine and no database: everything comes from the generator

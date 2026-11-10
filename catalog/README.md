@@ -6,7 +6,15 @@ Extra **synthetic** products for the data generator, described as TOML files and
 uv run generate-batch-records --batches 11 --catalog catalog --out data/
 ```
 
-Without `--catalog`, the generator makes only the two approved products, MBR-SYN500 and MBR-PLC250, which are defined in code.
+Without `--catalog`, the generator makes only the two approved products, MBR-SYN500 (B) and MBR-PLC250 (P), which are defined in code. With `--catalog`, the catalog's products are added after them.
+
+To generate **only** the catalog's products, add `--no-builtin`:
+
+```
+uv run generate-batch-records --batches 6 --catalog catalog --no-builtin --out data/
+```
+
+The letters B and P and the masters MBR-SYN500 v3 and MBR-PLC250 v1 are then free for catalog products.
 
 ## Layout
 
@@ -37,7 +45,7 @@ Each item's name is its file stem, so `templates/oral_liquid.toml` is the templa
   - `[limits]` gives `step_id = ["min", "max"]` for every measured step of the template and nothing else. `""` means no limit on that side.
   - A `defect_plan` must be for the product's template, and the product's limits must allow each defect. For example, an `out_of_range` defect with `side = "low"` needs a min. This is checked when the generator starts.
   - `id_letter` (one capital letter) and the master id and version must not clash with B, P or another product.
-- With k product lines in total, `--batches` k + 1 or more includes the second batch of the first line (B26-0002), which covers all 8 rules.
+- With k product lines in total (counting B and P unless `--no-builtin` is set), `--batches` k + 1 or more includes the second, defective batch of the first line. A line's defects start at its 2nd batch.
 
 ## Copies of the approved products
 
