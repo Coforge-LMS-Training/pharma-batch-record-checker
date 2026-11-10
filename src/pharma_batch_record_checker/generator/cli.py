@@ -30,6 +30,7 @@ from pharma_batch_record_checker.generator.masters import (
     SYN500,
     ProductConfig,
 )
+from pharma_batch_record_checker.schema import TIMESTAMP_FORMAT
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,34 @@ def check_batch_count(n: int) -> int:
     return n
 
 
+def check_start_year(when: datetime) -> datetime:
+    """Return when if its year is 2000-2099, else raise.
+
+    Batch IDs carry a two-digit year, which only names a year unambiguously
+    within one century.
+    """
+    if not 2000 <= when.year <= 2099:
+        raise ValueError(
+            f"start year must be 2000 to 2099, got {when:{TIMESTAMP_FORMAT}}"
+        )
+    return when
+
+
+def parse_start(text: str) -> datetime:
+    """Parse a --start value: canonical YYYY-MM-DDTHH:MM, year 2000-2099.
+
+    Like the CSV contract, non-canonical input (seconds, a timezone, a space
+    separator, missing zero padding) is rejected, not normalized.
+    """
+    try:
+        when = datetime.strptime(text, TIMESTAMP_FORMAT)
+    except ValueError:
+        when = None
+    if when is None or when.strftime(TIMESTAMP_FORMAT) != text:
+        raise ValueError(f"start must be YYYY-MM-DDTHH:MM, got {text!r}")
+    return check_start_year(when)
+
+
 def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ...]:
     """Plan n batches: alternate product lines; a line's even positions are defective.
 
@@ -100,9 +129,11 @@ def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ..
     line's defect plan at even positions (lines without one stay clean). The
     position keeps counting across a new year, so where the year changes
     doesn't change which batches are defective. B26-0002 carries the full
-    tablet plan, so n >= 3 plants all eight rules.
+    tablet plan, so n >= 3 plants all eight rules. Every batch must start in
+    2000-2099 (see check_start_year).
     """
     check_batch_count(n)
+    check_start_year(start)
     lines = PRODUCT_LINES
     next_start = [start] * len(lines)  # per line, by index
     seq_in_year: list[tuple[int, int]] = [(start.year, 0)] * len(lines)
@@ -111,7 +142,7 @@ def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ..
         index = i % len(lines)
         line = lines[index]
         position = i // len(lines) + 1
-        batch_start = next_start[index]
+        batch_start = check_start_year(next_start[index])
         next_start[index] = batch_start + batch_span(line.product) + CHANGEOVER
         year, seq = seq_in_year[index]
         seq = seq + 1 if batch_start.year == year else 1
@@ -140,8 +171,16 @@ def _batch_count(text: str) -> int:
         raise argparse.ArgumentTypeError(str(error)) from None
 
 
+def _start_time(text: str) -> datetime:
+    """argparse type for --start: a timestamp accepted by parse_start."""
+    try:
+        return parse_start(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def _parser() -> argparse.ArgumentParser:
-    """The command-line options: --seed, --batches and --out."""
+    """The command-line options: --seed, --batches, --start and --out."""
     parser = argparse.ArgumentParser(
         prog="generate-batch-records",
         description=(
@@ -162,6 +201,16 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--start",
+        type=_start_time,
+        default=DEFAULT_START,
+        help=(
+            "when each product line's first batch starts, as YYYY-MM-DDTHH:MM "
+            f"(default {DEFAULT_START:{TIMESTAMP_FORMAT}}); batch IDs take "
+            "their year from their start date"
+        ),
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         required=True,
@@ -177,7 +226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     and argparse exits with 2 on bad options.
     """
     args = _parser().parse_args(argv)
-    dataset = build_dataset(args.seed, plan_batches(args.batches))
+    dataset = build_dataset(args.seed, plan_batches(args.batches, args.start))
     try:
         write_dataset(dataset, args.out)
     except OSError as error:

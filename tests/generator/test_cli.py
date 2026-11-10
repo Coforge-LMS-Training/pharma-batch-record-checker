@@ -17,6 +17,7 @@ from pharma_batch_record_checker.generator.cli import (
     ProductLine,
     batch_span,
     main,
+    parse_start,
     plan_batches,
 )
 from pharma_batch_record_checker.generator.dataset_io import (
@@ -242,6 +243,75 @@ def test_rejects_bad_batches(bad, tmp_path, capsys):
         run(tmp_path, "--batches", bad)
     assert excinfo.value.code == 2
     assert "--batches" in capsys.readouterr().err
+
+
+def first_performed_at(out):
+    """{batch_id: performed_at of its first row} from out/batch_record.csv."""
+    firsts = {}
+    with (out / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            firsts.setdefault(row["batch_id"], row["performed_at"])
+    return firsts
+
+
+def test_start_option_moves_dates(tmp_path):
+    """--start changes the dates; the same flags still give byte-identical files."""
+    run(tmp_path / "a", "--batches", "8")
+    run(tmp_path / "b", "--batches", "8", "--start", "2026-12-31T07:00")
+    run(tmp_path / "c", "--batches", "8", "--start", "2026-12-31T07:00")
+    assert files_of(tmp_path / "a")[BATCH_FILE] != files_of(tmp_path / "b")[BATCH_FILE]
+    assert files_of(tmp_path / "b") == files_of(tmp_path / "c")
+    assert "B27-0001" in batch_ids_in(tmp_path / "b")
+    assert first_performed_at(tmp_path / "b")["B26-0001"] == "2026-12-31T07:00"
+
+
+def test_default_start_is_2026_10_12_0700(tmp_path):
+    """Without --start, the files equal those of --start 2026-10-12T07:00."""
+    run(tmp_path / "a", "--batches", "6")
+    run(tmp_path / "b", "--batches", "6", "--start", "2026-10-12T07:00")
+    assert files_of(tmp_path / "a") == files_of(tmp_path / "b")
+
+
+def test_seed_does_not_change_ids_or_start_times(tmp_path):
+    """--seed changes readings only: batch IDs and start times stay the same."""
+    run(tmp_path / "a", "--seed", "3", "--batches", "8")
+    run(tmp_path / "b", "--seed", "4", "--batches", "8")
+    assert first_performed_at(tmp_path / "a") == first_performed_at(tmp_path / "b")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "2026-10-12 07:00",
+        "2026-10-12T07:00:30",
+        "2026-10-12T07:00Z",
+        "2026-1-5T7:00",
+        "1999-12-31T07:00",
+        "2100-01-01T07:00",
+        "x",
+    ],
+)
+def test_rejects_bad_start(bad, tmp_path, capsys):
+    """--start must be canonical YYYY-MM-DDTHH:MM, year 2000-2099; else a usage error."""
+    with pytest.raises(ValueError, match="start"):
+        parse_start(bad)
+    with pytest.raises(SystemExit) as excinfo:
+        run(tmp_path, "--start", bad)
+    assert excinfo.value.code == 2
+    assert "argument --start" in capsys.readouterr().err
+    assert not (tmp_path / BATCH_FILE).exists()
+
+
+def test_parse_start_accepts_canonical_timestamp():
+    """A canonical timestamp parses to the same naive datetime."""
+    assert parse_start("2026-12-31T07:00") == datetime(2026, 12, 31, 7, 0)
+    assert parse_start("2099-12-31T23:59") == datetime(2099, 12, 31, 23, 59)
+
+
+def test_plan_batches_rejects_start_outside_2000s():
+    """plan_batches also refuses a start year that a two-digit YY can't name."""
+    with pytest.raises(ValueError, match="start"):
+        plan_batches(1, datetime(1999, 12, 31, 7, 0))
 
 
 def test_runs_as_module_byte_identical_twice(tmp_path):
