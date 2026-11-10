@@ -1,136 +1,232 @@
 {% extends "base.html" %}
-{% block title %}{{ batch.batch_id }} · Batch review{% endblock %}
+{% block title %}{{ batch.batch_id }} · Batch Record Review{% endblock %}
 {% block body %}
-<header class="running-head">
-  <p class="crumb"><a href="{{ url_for('index') }}">Batches</a></p>
-  <h1>{{ batch.batch_id }}</h1>
-  <p>Synthetic records</p>
-</header>
-<main id="content">
-  <p class="identity">
-    {% if latest %}
-    <span class="result result-{{ latest.result_category|replace(' ', '-')|lower }}">{{ latest.result_category }}</span>
-    {% else %}
-    <span class="result">No review</span>
-    {% endif %}
-    {% if master %}
-    <span>{{ master.product_name }}</span>
-    <span>Master {{ master.master_record_id }} v{{ master.master_version }}</span>
-    <span class="nowrap">Batch size {{ batch_size }} {{ master.batch_size_unit }}</span>
-    {% else %}
-    <span>Master {{ batch.master_record_id }} v{{ batch.master_version }} is not stored.</span>
-    {% endif %}
-    <a href="{{ url_for('export_csv', batch_id=batch.batch_id) }}">Download CSV</a>
-  </p>
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="{{ url_for('index') }}">Batches</a>
+  <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  <span aria-current="page">{{ batch.batch_id }}</span>
+</nav>
 
-  <h2>Runs</h2>
+<section class="card batch-head">
+  <div class="batch-title">
+    <div class="title-row">
+      <h1 class="id">{{ batch.batch_id }}</h1>
+      {% if latest %}
+      <span class="{{ result_class(latest.result_category) }} badge-lg">{{ latest.result_category }}</span>
+      {% else %}
+      <span class="badge badge-none badge-lg">Not reviewed</span>
+      {% endif %}
+    </div>
+    <dl class="meta">
+      {% if master %}
+      <div><dt>Product</dt><dd>{{ master.product_name }}</dd></div>
+      <div><dt>Master record</dt><dd>{{ master.master_record_id }} v{{ master.master_version }}</dd></div>
+      <div><dt>Batch size</dt><dd>{{ batch_size }} {{ master.batch_size_unit }}</dd></div>
+      {% else %}
+      <div><dt>Master record</dt><dd>{{ batch.master_record_id }} v{{ batch.master_version }} (not stored)</dd></div>
+      {% endif %}
+      {% if latest %}<div><dt>Last reviewed</dt><dd>{{ format_store_time(latest.created_at) }}</dd></div>{% endif %}
+    </dl>
+  </div>
+  <div class="actions" aria-label="Export">
+    <a class="icon-btn" href="{{ url_for('export_csv', batch_id=batch.batch_id) }}" download data-tip="Download CSV" aria-label="Download review history as CSV">
+      <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+    </a>
+    <a class="icon-btn" href="{{ email_link }}" data-tip="Email CSV link" aria-label="Email a link to the review history CSV">
+      <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>
+    </a>
+  </div>
+</section>
+
+{% if latest %}
+<section class="stat-grid stat-grid-sm" aria-label="This review in numbers">
+  <div class="stat"><span class="stat-label">Findings</span><span class="stat-value">{{ summary.findings }}</span></div>
+  <div class="stat stat-critical"><span class="stat-label"><span class="dot dot-critical"></span>Critical steps</span><span class="stat-value">{{ summary.critical_steps }}</span></div>
+  <div class="stat stat-needs-review"><span class="stat-label"><span class="dot dot-needs-review"></span>Needs Review steps</span><span class="stat-value">{{ summary.review_steps }}</span></div>
+  {% if total_steps %}
+  <div class="stat stat-no-findings"><span class="stat-label"><span class="dot dot-no-findings"></span>Steps passed</span><span class="stat-value">{{ total_steps - summary.steps }}<span class="stat-of"> of {{ total_steps }}</span></span></div>
+  {% endif %}
+</section>
+
+{% if strip %}
+<section class="card" aria-labelledby="strip-title">
+  <div class="card-head">
+    <h2 id="strip-title">Process steps</h2>
+    <ul class="legend-inline">
+      <li><span class="dot dot-critical"></span>Critical</li>
+      <li><span class="dot dot-needs-review"></span>Needs Review</li>
+      <li><span class="dot dot-clean"></span>Passed</li>
+    </ul>
+  </div>
+  <ol class="strip">
+    {% for s in strip %}
+    <li class="strip-step strip-{{ s.status }}">
+      {% if s.anchor %}
+      <a href="#{{ s.anchor }}" data-tip="Step {{ s.step_seq }} · {{ s.label }}: {{ s.findings|join(', ') }}" aria-label="Step {{ s.step_seq }}, {{ s.step_id }}, {{ s.label }}: {{ s.findings|join(', ') }}"><span class="strip-num">{{ s.step_seq }}</span></a>
+      {% else %}
+      <span data-tip="Step {{ s.step_seq }} · {{ s.label }}: passed" aria-label="Step {{ s.step_seq }}, {{ s.step_id }}, {{ s.label }}: passed"><span class="strip-num">{{ s.step_seq }}</span></span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  <p class="muted small">{{ summary.sentence }} Select a coloured step to jump to it.</p>
+</section>
+{% endif %}
+
+{% if groups %}
+<div class="detail-layout">
+  <aside class="step-nav" aria-label="Flagged steps">
+    <div class="step-nav-inner">
+      <h2 class="eyebrow">Flagged steps</h2>
+      {% for procedure in groups %}
+      <p class="step-nav-group">{{ procedure.unit_procedure }}</p>
+      <ul>
+        {% for step in procedure.steps %}
+        <li><a href="#step-{{ step.step_id }}" data-spy="step-{{ step.step_id }}"><span class="dot dot-{{ step.status }}"></span><span class="id">{{ step.step_id }}</span><span class="muted">{{ step.parameter }}</span></a></li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <section class="findings" aria-labelledby="findings-title">
+    <div class="findings-head">
+      <h2 id="findings-title">Findings</h2>
+      <div class="chips" role="group" aria-label="Show findings" data-chips hidden>
+        <button type="button" class="chip" aria-pressed="true" data-filter="all">All <span class="count">{{ summary.findings }}</span></button>
+        {% if summary.critical_findings %}<button type="button" class="chip" aria-pressed="false" data-filter="critical"><span class="dot dot-critical"></span>Critical <span class="count">{{ summary.critical_findings }}</span></button>{% endif %}
+        {% if summary.review_findings %}<button type="button" class="chip" aria-pressed="false" data-filter="needs-review"><span class="dot dot-needs-review"></span>Needs Review <span class="count">{{ summary.review_findings }}</span></button>{% endif %}
+      </div>
+    </div>
+
+    {% for procedure in groups %}
+    {% for step in procedure.steps %}
+    <article class="card step-card step-{{ step.status }}" id="step-{{ step.step_id }}" data-status="{{ step.status }}">
+      <header class="step-head">
+        <p class="path">{{ step.unit_procedure }} <span aria-hidden="true">›</span> {{ step.operation }} <span aria-hidden="true">›</span> {{ step.phase }}{% if total_steps %} · Step {{ step.step_seq }} of {{ total_steps }}{% endif %}</p>
+        <div class="step-title">
+          <h3><span class="id">{{ step.step_id }}</span> {{ step.parameter }}</h3>
+          <span class="{{ result_class(step.severity) }}">{{ step.severity }}</span>
+        </div>
+        {% if step.findings|length > 1 %}<p class="muted small">{{ step.findings|length }} checks failed on this step, so it is Critical.</p>{% endif %}
+      </header>
+
+      {% for finding in step.findings %}
+      {% set drafting = note_finding_id == finding.finding_id %}
+      <section class="finding" id="finding-{{ finding.finding_id }}" data-rule="{{ finding.rule_id }}" data-status="{{ finding.status }}">
+        <h4 class="finding-title">
+          <svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>{{ finding.title }}
+        </h4>
+        <p class="finding-meaning">{{ finding.meaning }}</p>
+
+        {% if finding.is_missing_step %}
+        <p class="callout callout-missing"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>This step has <strong>no row at all</strong> in the batch record, so nothing was recorded for it.</span></p>
+        {% elif finding.missing_labels %}
+        <p class="callout callout-missing"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span><strong>Missing:</strong> {{ finding.missing_labels|join(' and ') }} {{ 'was' if finding.missing_labels|length == 1 else 'were' }} left empty in the batch record.</span></p>
+        {% elif finding.detail != finding.title %}
+        <p class="callout"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>{{ finding.detail }}</span></p>
+        {% endif %}
+
+        {% if finding.range %}
+        {% set r = finding.range %}
+        <div class="range{% if not r.inside %} range-out{% endif %}" role="img" aria-label="Reading {{ r.reading }}; allowed {{ r.low }} to {{ r.high }}; {{ 'inside' if r.inside else 'outside' }} the range">
+          <div class="range-track">
+            <span class="range-band" style="left: {{ r.band_left }}%; width: {{ r.band_width }}%"></span>
+            <span class="range-marker" style="left: {{ r.marker }}%"><span class="range-value">{{ finding.reading }}</span></span>
+          </div>
+          <div class="range-scale" aria-hidden="true">
+            <span style="left: {{ r.band_left }}%">{{ r.low }}</span>
+            <span style="left: {{ r.band_left + r.band_width }}%">{{ r.high }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+        <dl class="fields">
+          {% for f in finding.snapshot %}
+          {% if not finding.is_missing_step or f.name in ('limits', 'expected_unit', 'master_critical') %}
+          <div class="field-tile{% if f.flagged %} is-flagged{% endif %}{% if f.missing %} is-missing{% endif %}">
+            <dt>{{ f.label }}{% if f.flagged %}<span class="sr-only"> (this finding is about this field)</span>{% endif %}</dt>
+            <dd>{% if f.missing and f.flagged %}<svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{% endif %}{{ f.value }}</dd>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </dl>
+
+        {% if finding.comment is not none %}
+        <figure class="quote">
+          <svg class="icon" aria-hidden="true"><use href="#i-quote"/></svg>
+          <blockquote>{{ finding.comment }}</blockquote>
+          <figcaption>Operator comment · shown as written, never acted on</figcaption>
+        </figure>
+        {% endif %}
+
+        <div class="notes">
+          <h5><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg>Notes{% if finding.notes %} <span class="count">{{ finding.notes|length }}</span>{% endif %}</h5>
+          {% if finding.notes %}
+          <ol class="note-list">
+            {% for note in finding.notes %}
+            <li><p>{{ note.note_text }}</p><p class="muted small">{{ note.reviewer_name }} · {{ note.noted_at }}</p></li>
+            {% endfor %}
+          </ol>
+          {% endif %}
+          <details class="add-note"{% if drafting %} open{% endif %}>
+            <summary class="btn btn-secondary btn-sm"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg>Add note</summary>
+            {% if note_error and drafting %}
+            <p class="alert" role="alert"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{{ note_error }}</p>
+            {% endif %}
+            <form class="note-form" method="post" action="{{ url_for('add_note', finding_id=finding.finding_id) }}">
+              <label>Your name
+                <input name="reviewer_name" autocomplete="name" value="{% if drafting %}{{ draft_name }}{% endif %}">
+              </label>
+              <label>Note
+                <textarea name="note_text" rows="3" placeholder="What did you check or decide?">{% if drafting %}{{ draft_text }}{% endif %}</textarea>
+              </label>
+              <p class="muted small">Notes are permanent and cannot be edited or deleted.</p>
+              <button class="btn btn-primary btn-sm" type="submit">Add note</button>
+            </form>
+          </details>
+        </div>
+      </section>
+      {% endfor %}
+    </article>
+    {% endfor %}
+    {% endfor %}
+    <p class="no-match card" hidden data-no-match>No findings at this level.</p>
+  </section>
+</div>
+{% elif latest %}
+<div class="empty-state card">
+  <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+  <p><strong>No findings.</strong> Every step matches its master record.</p>
+</div>
+{% endif %}
+{% endif %}
+
+<section class="card" id="history" aria-labelledby="history-title">
+  <div class="card-head">
+    <h2 id="history-title"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>Review history</h2>
+  </div>
   {% if runs %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Reviewed</th>
-          <th>Rule version</th>
-          <th>Result</th>
-          <th>Latest</th>
-        </tr>
-      </thead>
+  <p class="muted small">Each review is stored as a new run. Earlier runs are kept unchanged; the findings above come from the latest run.</p>
+  <div class="table-card table-flat">
+    <table class="data-table">
+      <thead><tr><th>Reviewed</th><th>Rule version</th><th>Result</th><th></th></tr></thead>
       <tbody>
-        {% for run in runs %}
+        {% for run in runs|reverse %}
         <tr>
-          <td class="figure lead" data-label="Reviewed">{{ format_store_time(run.created_at) }}</td>
-          <td class="figure" data-label="Rule version">{{ run.rule_version }}</td>
-          <td class="result result-{{ run.result_category|replace(' ', '-')|lower }}" data-label="Result">{{ run.result_category }}</td>
-          <td data-label="Latest">{% if latest and run.run_id == latest.run_id %}yes{% endif %}</td>
+          <td class="c-key num-font">{{ format_store_time(run.created_at) }}</td>
+          <td class="c-meta" data-label="Rule version">{{ run.rule_version }}</td>
+          <td class="c-result"><span class="{{ result_class(run.result_category) }}">{{ run.result_category }}</span></td>
+          <td class="c-meta">{% if latest and run.run_id == latest.run_id %}<span class="tag">Latest</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="empty">No review is stored for this batch.</p>
+  <p class="muted">No review is stored for this batch.</p>
   {% endif %}
+</section>
 
-  {% if latest %}
-  <h2>Findings</h2>
-  {% if groups %}
-    {% for procedure in groups %}
-    <section class="procedure">
-      <h3>{{ procedure.unit_procedure }}</h3>
-      {% for operation in procedure.operations %}
-      <section class="operation">
-        <h4>{{ operation.operation }}</h4>
-        {% for phase in operation.phases %}
-        <section class="phase">
-          <h5>{{ phase.phase }}</h5>
-          {% for step in phase.steps %}
-          <section class="step" id="step-{{ step.step_id }}">
-            <h6 class="step-id">{{ step.step_id }}</h6>
-            <p class="parameter">{{ step.parameter }}</p>
-            {% for finding in step.findings %}
-            <article class="finding" id="finding-{{ finding.finding_id }}">
-              <div class="finding-head">
-                <p class="rule">{{ finding.rule_id }}</p>
-                <p class="result result-{{ finding.step_severity|replace(' ', '-')|lower }}">{{ finding.step_severity }}</p>
-              </div>
-              <p class="detail">{{ finding.detail }}</p>
-              <dl class="snapshot">
-                <div><dt>Reading</dt><dd>{{ finding.reading }}</dd></div>
-                <div><dt>Recorded unit</dt><dd>{{ finding.recorded_unit }}</dd></div>
-                <div><dt>Expected unit</dt><dd>{{ finding.expected_unit }}</dd></div>
-                <div><dt>Limits</dt><dd>{{ finding.limits }}</dd></div>
-                <div><dt>Performed by</dt><dd>{{ finding.performed_by }}</dd></div>
-                <div><dt>Performed at</dt><dd>{{ finding.performed_at }}</dd></div>
-                <div><dt>Verified by</dt><dd>{{ finding.verified_by }}</dd></div>
-                <div><dt>Verified at</dt><dd>{{ finding.verified_at }}</dd></div>
-                <div><dt>Master critical</dt><dd>{{ finding.master_critical }}</dd></div>
-              </dl>
-              {% if finding.comment is not none %}
-              <div class="comment">
-                <p class="field-label">Comment</p>
-                <p class="comment-text">{{ finding.comment }}</p>
-              </div>
-              {% endif %}
-              <div class="notes">
-                <p class="field-label">Notes</p>
-                {% if finding.notes %}
-                <ol>
-                  {% for note in finding.notes %}
-                  <li>
-                    <p class="note-text">{{ note.note_text }}</p>
-                    <p class="note-by">{{ note.reviewer_name }} · {{ note.noted_at }}</p>
-                  </li>
-                  {% endfor %}
-                </ol>
-                {% else %}
-                <p class="quiet">No notes.</p>
-                {% endif %}
-                {% if note_error and note_finding_id == finding.finding_id %}
-                <p class="problem" role="alert">{{ note_error }}</p>
-                {% endif %}
-                <form class="note-form" method="post" action="{{ url_for('add_note', finding_id=finding.finding_id) }}">
-                  <label>Name
-                    <input name="reviewer_name" autocomplete="name" value="{% if note_finding_id == finding.finding_id %}{{ draft_name }}{% endif %}">
-                  </label>
-                  <label>Note
-                    <textarea name="note_text" rows="3">{% if note_finding_id == finding.finding_id %}{{ draft_text }}{% endif %}</textarea>
-                  </label>
-                  <button type="submit">Add note</button>
-                </form>
-              </div>
-            </article>
-            {% endfor %}
-          </section>
-          {% endfor %}
-        </section>
-        {% endfor %}
-      </section>
-      {% endfor %}
-    </section>
-    {% endfor %}
-  {% else %}
-  <p class="empty">This run has no findings.</p>
-  {% endif %}
-  {% endif %}
-</main>
+<a class="to-top" href="#content" data-to-top aria-label="Back to top"><svg class="icon" aria-hidden="true"><use href="#i-arrow-up"/></svg></a>
 {% endblock %}

@@ -1,15 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Store unavailable · Batch review{% endblock %}
+{% block title %}Store unavailable · Batch Record Review{% endblock %}
 {% block body %}
-<header class="running-head">
-  <h1>Batch review</h1>
-  <p>Specification index · synthetic</p>
-</header>
-<main id="content">
+<div class="empty-state card">
+  <svg class="icon icon-warn" aria-hidden="true"><use href="#i-alert"/></svg>
   {% if missing_url %}
-  <p class="problem" role="alert">DATABASE_URL is not set. The pages read the store through that URL.</p>
+  <p role="alert"><strong>DATABASE_URL is not set.</strong> The pages read the store through that URL.</p>
   {% else %}
-  <p class="problem" role="alert">The store is not reachable. Start Postgres, then run alembic upgrade head.</p>
+  <p role="alert"><strong>The store is not reachable.</strong> Start Postgres, then run alembic upgrade head.</p>
   {% endif %}
-</main>
+</div>
 {% endblock %}
+{% block help %}{% endblock %}
