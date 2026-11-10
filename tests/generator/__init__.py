@@ -12,4 +12,5 @@ KNOWN_GENERATOR_MODULES: tuple[str, ...] = (
     "dataset_io",
     "cli",
     "product_file",
+    "catalog",
 )

@@ -1,0 +1,93 @@
+# Oral solution: dissolve, filter and fill bottles (a non-solid dosage form).
+# Synthetic process for test data only, not taken from any real master record.
+
+description = "Oral solution, dissolve-and-fill route (10 steps)"
+
+[[step]]
+step_id        = "S-DISP-01"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh API"
+parameter      = "API net weight"
+unit           = "kg"
+critical       = true
+
+[[step]]
+step_id        = "S-DISP-02"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh {excipient}"
+parameter      = "Excipient net weight"
+unit           = "kg"
+critical       = false
+
+[[step]]
+step_id        = "S-MIX-01"
+unit_procedure = "Compounding"
+operation      = "Dissolve"
+phase          = "Mix"
+parameter      = "Mixing time"
+unit           = "min"
+critical       = false
+
+[[step]]
+step_id        = "S-MIX-02"
+unit_procedure = "Compounding"
+operation      = "Dissolve"
+phase          = "Check pH"
+parameter      = "pH"
+unit           = "pH"
+critical       = true
+
+[[step]]
+step_id        = "S-MIX-03"
+unit_procedure = "Compounding"
+operation      = "Dissolve"
+phase          = "Check viscosity"
+parameter      = "Viscosity"
+unit           = "cP"
+critical       = false
+
+[[step]]
+step_id        = "S-FILT-01"
+unit_procedure = "Filtration"
+operation      = "Clarify"
+phase          = "Filter integrity test"
+parameter      = "Bubble point"
+unit           = "bar"
+critical       = true
+
+[[step]]
+step_id        = "S-FILL-01"
+unit_procedure = "Filling"
+operation      = "Bottle filling"
+phase          = "In-process check"
+parameter      = "Fill volume"
+unit           = "mL"
+critical       = true
+
+[[step]]
+step_id        = "S-FILL-02"
+unit_procedure = "Filling"
+operation      = "Capping"
+phase          = "In-process check"
+parameter      = "Cap torque"
+unit           = "Ncm"
+critical       = false
+
+[[step]]
+step_id        = "S-PACK-01"
+unit_procedure = "Packaging"
+operation      = "Line setup"
+phase          = "Line clearance"
+# sign-off only: no parameter or unit
+critical       = true
+
+[[step]]
+step_id        = "S-PACK-02"
+unit_procedure = "Packaging"
+operation      = "Labelling"
+phase          = "Check label"
+parameter      = "Label count reconciliation"
+unit           = "%"
+critical       = false

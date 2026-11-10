@@ -1,0 +1,147 @@
+# Copy of TABLET_PROCESS in generator/masters.py, used by the approved product MBR-SYN500.
+# A test fails if this file and the code constant ever differ: change both together.
+
+description = "Film-coated tablet, wet-granulation route (16 steps)"
+
+[[step]]
+step_id        = "S-DISP-01"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh API"
+parameter      = "API net weight"
+unit           = "kg"
+critical       = true
+
+[[step]]
+step_id        = "S-DISP-02"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh {excipient}"
+parameter      = "Excipient net weight"
+unit           = "kg"
+critical       = false
+
+[[step]]
+step_id        = "S-GRAN-01"
+unit_procedure = "Granulation"
+operation      = "Wet granulation"
+phase          = "Add granulating water"
+parameter      = "Water added"
+unit           = "L"
+critical       = false
+
+[[step]]
+step_id        = "S-GRAN-02"
+unit_procedure = "Granulation"
+operation      = "Wet granulation"
+phase          = "Granulate"
+parameter      = "Impeller speed"
+unit           = "rpm"
+critical       = false
+
+[[step]]
+step_id        = "S-GRAN-03"
+unit_procedure = "Granulation"
+operation      = "Wet granulation"
+phase          = "Granulate"
+parameter      = "Granulation time"
+unit           = "min"
+critical       = false
+
+[[step]]
+step_id        = "S-GRAN-04"
+unit_procedure = "Granulation"
+operation      = "Fluid bed drying"
+phase          = "Dry granules"
+parameter      = "Inlet air temperature"
+unit           = "degC"
+critical       = false
+
+[[step]]
+step_id        = "S-GRAN-05"
+unit_procedure = "Granulation"
+operation      = "Fluid bed drying"
+phase          = "Check dryness"
+parameter      = "Loss on drying"
+unit           = "%"
+critical       = true
+
+[[step]]
+step_id        = "S-BLEND-01"
+unit_procedure = "Blending"
+operation      = "Final blend"
+phase          = "Blend"
+parameter      = "Blend time"
+unit           = "min"
+critical       = false
+
+[[step]]
+step_id        = "S-BLEND-02"
+unit_procedure = "Blending"
+operation      = "Final blend"
+phase          = "Blend"
+parameter      = "Blender speed"
+unit           = "rpm"
+critical       = false
+
+[[step]]
+step_id        = "S-COMP-01"
+unit_procedure = "Compression"
+operation      = "Tablet compression"
+phase          = "In-process check"
+parameter      = "Tablet weight"
+unit           = "mg"
+critical       = true
+
+[[step]]
+step_id        = "S-COMP-02"
+unit_procedure = "Compression"
+operation      = "Tablet compression"
+phase          = "In-process check"
+parameter      = "Tablet hardness"
+unit           = "kP"
+critical       = true
+
+[[step]]
+step_id        = "S-COMP-03"
+unit_procedure = "Compression"
+operation      = "Tablet compression"
+phase          = "In-process check"
+parameter      = "Tablet thickness"
+unit           = "mm"
+critical       = false
+
+[[step]]
+step_id        = "S-COAT-01"
+unit_procedure = "Coating"
+operation      = "Film coating"
+phase          = "Spray coat"
+parameter      = "Inlet air temperature"
+unit           = "degC"
+critical       = false
+
+[[step]]
+step_id        = "S-COAT-02"
+unit_procedure = "Coating"
+operation      = "Film coating"
+phase          = "Check coat"
+parameter      = "Coating weight gain"
+unit           = "%"
+critical       = true
+
+[[step]]
+step_id        = "S-PACK-01"
+unit_procedure = "Packaging"
+operation      = "Line setup"
+phase          = "Line clearance"
+# sign-off only: no parameter or unit
+critical       = true
+
+[[step]]
+step_id        = "S-PACK-02"
+unit_procedure = "Packaging"
+operation      = "Blister packaging"
+phase          = "Check label"
+parameter      = "Label count reconciliation"
+unit           = "%"
+critical       = false
