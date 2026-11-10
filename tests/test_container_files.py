@@ -144,3 +144,13 @@ def test_app_does_not_depend_on_the_generator():
     assert depends
     assert "generator" not in depends.group(1)
     assert "postgres" in depends.group(1)
+
+
+def test_generator_defaults_to_15_batches():
+    """`docker compose run --rm generator` makes 15 batches unless BATCHES is set.
+
+    With the catalog there are 6 product lines, and a line's defective batch
+    is its 2nd, so 12 batches reach every product's defects; 15 leaves room.
+    """
+    command = compose_block("generator")
+    assert re.search(r'"--batches"\s*\n\s*-\s*"\$\{BATCHES:-15\}"', command)

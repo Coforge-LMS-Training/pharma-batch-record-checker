@@ -75,7 +75,7 @@ It doesn't need Postgres and doesn't start it. Passing flags replaces the defaul
 
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
-| `BATCHES` | `11` | `docker compose run generator` | `--batches` (only when no flags are passed) |
+| `BATCHES` | `15` | `docker compose run generator` | `--batches` (only when no flags are passed) |
 | `SEED` | `0` | `docker compose run generator` | `--seed` (only when no flags are passed) |
 | `APP_PORT` | `8000` | app | host port, bound to 127.0.0.1 |
 | `POSTGRES_PORT` | `5432` | postgres | host port |
