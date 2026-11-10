@@ -12,7 +12,7 @@ import dataclasses
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pharma_batch_record_checker.generator.batches import (
@@ -36,9 +36,10 @@ from pharma_batch_record_checker.generator.masters import (
 class ProductLine:
     """A product the command generates batches for, and how to name them.
 
-    prefix starts every batch ID of the product (B26-0001, ...). defect_plan is
-    the plan whose defects every defective batch reuses; None means the
-    product only gets clean batches.
+    prefix is the letter that starts every batch ID of the product; the
+    two-digit year and the sequence number follow it (B26-0001, ...).
+    defect_plan is the plan whose defects every defective batch reuses; None
+    means the product only gets clean batches.
     """
 
     product: ProductConfig
@@ -53,16 +54,15 @@ def _defect_plan_for(product: ProductConfig) -> BatchPlan | None:
 
 # Batches alternate between these lines, in this order.
 PRODUCT_LINES: tuple[ProductLine, ...] = (
-    ProductLine(SYN500, "B26", _defect_plan_for(SYN500)),
-    ProductLine(PLC250, "P26", _defect_plan_for(PLC250)),
+    ProductLine(SYN500, "B", _defect_plan_for(SYN500)),
+    ProductLine(PLC250, "P", _defect_plan_for(PLC250)),
 )
 
-FIRST_START = datetime(2026, 10, 12, 7, 0)
-LAST_DAY = date(2026, 12, 31)
-# One batch per product per day, and every batch must start in 2026 so its
-# date matches the "26" in its ID.
-DAYS_AVAILABLE = (LAST_DAY - FIRST_START.date()).days + 1
-MAX_BATCHES = DAYS_AVAILABLE * len(PRODUCT_LINES)
+# When each line's first batch starts, unless --start says otherwise.
+DEFAULT_START = datetime(2026, 10, 12, 7, 0)
+# A sanity limit on --batches. Batch IDs follow their start dates, so this
+# no longer keeps anything in step; it only bounds the run size.
+MAX_BATCHES = 2000
 
 # Time between one batch's last possible timestamp and the next batch's first
 # step on the same line (cleaning and line clearance).
@@ -86,35 +86,45 @@ def check_batch_count(n: int) -> int:
     return n
 
 
-def plan_batches(n: int) -> tuple[BatchPlan, ...]:
-    """Plan n batches: alternate product lines; a line's even-numbered batches are defective.
+def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ...]:
+    """Plan n batches: alternate product lines; a line's even positions are defective.
 
-    A line's k-th batch has ID <prefix>-<k:04d> (B26-0001, P26-0001, ...).
-    Each line's first batch starts at FIRST_START, and each later one starts
+    Each line's first batch starts at start, and each later one starts
     batch_span + CHANGEOVER after the previous batch on that line, so batches
     on a line never overlap and start times move around the clock. The
-    schedule doesn't depend on the seed. A batch is clean when k is odd and
-    carries the line's defect plan when k is even (lines without one stay
-    clean). B26-0002 carries the full tablet plan, so n >= 3 plants all eight
-    rules.
+    schedule doesn't depend on the seed.
+
+    A batch's ID is <prefix><YY>-<seq:04d>, where YY is its start year, and
+    seq counts the line's batches within that year (B26-0001, B26-0002, ...,
+    B27-0001). A batch is clean at odd positions on its line and carries the
+    line's defect plan at even positions (lines without one stay clean). The
+    position keeps counting across a new year, so where the year changes
+    doesn't change which batches are defective. B26-0002 carries the full
+    tablet plan, so n >= 3 plants all eight rules.
     """
     check_batch_count(n)
     lines = PRODUCT_LINES
-    next_start = [FIRST_START] * len(lines)  # per line, by index
+    next_start = [start] * len(lines)  # per line, by index
+    seq_in_year: list[tuple[int, int]] = [(start.year, 0)] * len(lines)
     plans = []
     for i in range(n):
         index = i % len(lines)
         line = lines[index]
-        k = i // len(lines) + 1
-        batch_id = f"{line.prefix}-{k:04d}"
-        start = next_start[index]
-        next_start[index] = start + batch_span(line.product) + CHANGEOVER
-        if k % 2 == 0 and line.defect_plan is not None:
+        position = i // len(lines) + 1
+        batch_start = next_start[index]
+        next_start[index] = batch_start + batch_span(line.product) + CHANGEOVER
+        year, seq = seq_in_year[index]
+        seq = seq + 1 if batch_start.year == year else 1
+        seq_in_year[index] = (batch_start.year, seq)
+        batch_id = f"{line.prefix}{batch_start:%y}-{seq:04d}"
+        if position % 2 == 0 and line.defect_plan is not None:
             plans.append(
-                dataclasses.replace(line.defect_plan, batch_id=batch_id, start=start)
+                dataclasses.replace(
+                    line.defect_plan, batch_id=batch_id, start=batch_start
+                )
             )
         else:
-            plans.append(BatchPlan(line.product, batch_id, start))
+            plans.append(BatchPlan(line.product, batch_id, batch_start))
     return tuple(plans)
 
 

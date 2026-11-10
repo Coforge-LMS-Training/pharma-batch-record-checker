@@ -136,7 +136,7 @@ def test_clean_batch_crossing_midnight_is_unflagged():
 
 @pytest.mark.parametrize("n", [0, -1, MAX_BATCHES + 1])
 def test_rejects_n_outside_range(n):
-    """N must be 1 to MAX_BATCHES (so every batch starts in 2026)."""
+    """N must be 1 to MAX_BATCHES, a plain sanity limit."""
     with pytest.raises(ValueError, match="batches"):
         plan_batches(n)
 
@@ -269,10 +269,10 @@ def test_runs_as_module_byte_identical_twice(tmp_path):
 
 
 def test_batch_ids_use_product_line_prefix():
-    """Each product line declares its batch-ID prefix explicitly."""
+    """Each product line declares its batch-ID letter; the year comes from the date."""
     assert [(line.product.master_record_id, line.prefix) for line in PRODUCT_LINES] == [
-        ("MBR-SYN500", "B26"),
-        ("MBR-PLC250", "P26"),
+        ("MBR-SYN500", "B"),
+        ("MBR-PLC250", "P"),
     ]
 
 
@@ -280,7 +280,7 @@ def test_product_without_defect_plan_gets_clean_batches(monkeypatch):
     """A product line with no defect plan only produces clean batches."""
     other = dataclasses.replace(SYN500, master_record_id="MBR-TST100")
     monkeypatch.setattr(
-        cli_module, "PRODUCT_LINES", (ProductLine(other, "T26", defect_plan=None),)
+        cli_module, "PRODUCT_LINES", (ProductLine(other, "T", defect_plan=None),)
     )
     plans = plan_batches(4)
     assert [p.batch_id for p in plans] == [
@@ -300,10 +300,65 @@ def test_three_batches_are_the_minimum_for_all_eight_rules():
     assert build_dataset(0, plan_batches(2)).findings == []
 
 
-def test_all_start_dates_stay_in_2026():
-    """Even at the maximum, every batch starts in 2026, matching the '26' in its ID."""
+def test_batch_id_year_matches_start_year():
+    """Every ID's two-digit year is its start year, even at MAX_BATCHES (past 2026)."""
     plans = plan_batches(MAX_BATCHES)
-    assert {p.start.year for p in plans} == {2026}
+    for plan in plans:
+        assert plan.batch_id[1:3] == f"{plan.start:%y}"
+    assert {p.start.year for p in plans} > {2026}
+
+
+def test_max_batches_is_a_plain_sanity_limit():
+    """The cap no longer depends on days left in 2026."""
+    assert MAX_BATCHES == 2000
+
+
+NEW_YEAR_START = datetime(2026, 12, 31, 7, 0)
+
+
+def test_ids_restart_at_new_year():
+    """A line's sequence restarts at 0001 when its start year changes."""
+    plans = plan_batches(8, NEW_YEAR_START)
+    assert ids(plans) == [
+        "B26-0001",
+        "P26-0001",
+        "B26-0002",
+        "P26-0002",
+        "B27-0001",
+        "P26-0003",
+        "B27-0002",
+        "P27-0001",
+    ]
+    starts = {p.batch_id: p.start for p in plans}
+    assert starts["B27-0001"] == datetime(2027, 1, 1, 4, 40)
+    assert starts["P26-0003"] == datetime(2026, 12, 31, 22, 40)
+    assert starts["P27-0001"] == datetime(2027, 1, 1, 6, 30)
+
+
+def test_defects_follow_line_position_across_new_year():
+    """Defects go on a line's even positions, not its even sequence numbers.
+
+    B27-0002 is the line's 4th batch, so it is defective even though its
+    sequence number restarted at the new year.
+    """
+    plans = plan_batches(8, NEW_YEAR_START)
+    assert [bool(p.defects) for p in plans] == [
+        False,
+        False,
+        True,
+        True,
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert {p.batch_id: bool(p.defects) for p in plans}["B27-0002"]
+
+
+def test_first_batch_of_each_line_starts_at_start():
+    """Both lines' first batches start exactly at the given start."""
+    plans = plan_batches(2, NEW_YEAR_START)
+    assert [p.start for p in plans] == [NEW_YEAR_START, NEW_YEAR_START]
 
 
 def test_unwritable_out_reports_error(tmp_path, capsys):
