@@ -50,6 +50,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
     DefectLog,
 )
 from pharma_batch_record_checker.generator.masters import (
+    APPROVED_PRODUCTS,
     PLC250,
     SYN500,
     ProductConfig,
@@ -198,7 +199,10 @@ def extra_lines(
     """Product lines for the products of a --catalog folder, in catalog order.
 
     base is the built-in lines (None means PRODUCT_LINES). A catalog product's
-    ID letter and master (id and version) must be new. Its defect plan, if
+    ID letter must be new among the lines in use, and its master (id and
+    version) must be new and never one of the approved masters, even when
+    base leaves the built-ins out: those identities belong to the approved
+    sample and must not be redefined. Its defect plan, if
     any, becomes the line's plan and is dry-run planted on a clean batch, so
     a defect its limits can't take (e.g. out_of_range below a missing min) or
     a combination that couldn't all fire is refused here rather than mid-run.
@@ -208,9 +212,15 @@ def extra_lines(
     base = PRODUCT_LINES if base is None else tuple(base)
     letters = {line.prefix for line in base}
     masters = {_master_id(line.product) for line in base}
+    approved = {_master_id(product) for product in APPROVED_PRODUCTS}
     lines = []
     for item in catalog_products:
         name = _master_id(item.product)
+        if name in approved:
+            raise ValueError(
+                f"{name} is an approved master; a catalog product can't reuse "
+                "its id and version"
+            )
         if item.prefix in letters:
             raise ValueError(f"{name}: ID letter {item.prefix} is already used")
         if name in masters:

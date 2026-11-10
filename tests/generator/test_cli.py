@@ -805,13 +805,45 @@ def test_no_builtin_needs_catalog(tmp_path, capsys):
     assert not out.exists()
 
 
-def test_extra_lines_with_empty_base_allows_builtin_letters_and_masters():
-    """With no base lines, B and MBR-SYN500 v3 are free to use."""
-    item = catalog_product(
-        prefix="B", master_record_id="MBR-SYN500", master_version="3"
-    )
-    (line,) = extra_lines((item,), base=())
+def test_extra_lines_with_empty_base_frees_the_builtin_letters():
+    """With no base lines, the letter B is free for a catalog product."""
+    (line,) = extra_lines((catalog_product(prefix="B"),), base=())
     assert line.prefix == "B"
+
+
+@pytest.mark.parametrize(
+    ("master", "version"), [("MBR-SYN500", "3"), ("MBR-PLC250", "1")]
+)
+def test_approved_masters_stay_reserved_without_builtins(master, version):
+    """An approved master's id and version can't be reused, even with no base lines.
+
+    Otherwise a dataset could carry a different 'MBR-SYN500 v3' than the
+    approved one, clashing with it under the same join key in the store.
+    """
+    item = catalog_product(prefix="B", master_record_id=master, master_version=version)
+    with pytest.raises(ValueError, match=f"{master} v{version} is an approved master"):
+        extra_lines((item,), base=())
+
+
+def test_no_builtin_catalog_reusing_an_approved_master_is_a_usage_error(
+    tmp_path, capsys
+):
+    """Through the CLI, the reserved master is a one-line usage error."""
+    catalog = catalog_copy(
+        tmp_path,
+        edits={
+            "fictoprin_40mg.toml": (
+                'master_record_id = "MBR-FTP040"',
+                'master_record_id = "MBR-PLC250"',
+            )
+        },
+    )
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--catalog", str(catalog), "--no-builtin")
+    assert excinfo.value.code == 2
+    assert "MBR-PLC250 v1 is an approved master" in capsys.readouterr().err
+    assert not out.exists()
 
 
 # --- Runs that would go past 2099 ---------------------------------------------
