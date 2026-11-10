@@ -4,8 +4,10 @@
 
 Writes master_record.csv, batch_record.csv and expected_findings.csv to --out.
 Each product line runs its batches back to back from --start, and every batch
-ID takes its two-digit year from its start date. The same --seed, --batches
-and --start always give byte-identical files; --seed changes readings only.
+ID takes its two-digit year from its start date. --products FILE adds extra
+synthetic products from a TOML file (see product_file.py); without it, only
+SYN500 and PLC250 are generated. The same --seed, --batches, --start and
+products file always give byte-identical files; --seed changes readings only.
 It needs no rules engine and no database: everything comes from the generator
 modules.
 """
