@@ -118,7 +118,11 @@ def parse_start(text: str) -> datetime:
     return check_start_year(when)
 
 
-def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ...]:
+def plan_batches(
+    n: int,
+    start: datetime = DEFAULT_START,
+    lines: Sequence[ProductLine] | None = None,
+) -> tuple[BatchPlan, ...]:
     """Plan n batches: alternate product lines; a line's even positions are defective.
 
     Each line's first batch starts at start, and each later one starts
@@ -134,10 +138,13 @@ def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ..
     doesn't change which batches are defective. B26-0002 carries the full
     tablet plan, so n >= 3 plants all eight rules. Every batch must start in
     2000-2099 (see check_start_year).
+
+    lines are the product lines to alternate, in order; None means
+    PRODUCT_LINES (read at call time).
     """
     check_batch_count(n)
     check_start_year(start)
-    lines = PRODUCT_LINES
+    lines = PRODUCT_LINES if lines is None else tuple(lines)
     next_start = [start] * len(lines)  # per line, by index
     seq_in_year: list[tuple[int, int]] = [(start.year, 0)] * len(lines)
     plans = []

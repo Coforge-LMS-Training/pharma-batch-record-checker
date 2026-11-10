@@ -439,3 +439,29 @@ def test_unwritable_out_reports_error(tmp_path, capsys):
     err = capsys.readouterr().err
     assert err.startswith("generate-batch-records: error: cannot write to ")
     assert "Traceback" not in err
+
+
+# --- Product lines passed in (for --products) ---------------------------------
+
+TST_LINE = ProductLine(
+    dataclasses.replace(SYN500, master_record_id="MBR-TST100"), "T", defect_plan=None
+)
+
+
+def test_plan_batches_uses_given_lines():
+    """Given lines alternate in order; each counts its own IDs from 0001."""
+    plans = plan_batches(6, lines=(*PRODUCT_LINES, TST_LINE))
+    assert ids(plans) == [
+        "B26-0001",
+        "P26-0001",
+        "T26-0001",
+        "B26-0002",
+        "P26-0002",
+        "T26-0002",
+    ]
+    assert not any(p.defects for p in plans if p.batch_id.startswith("T"))
+
+
+def test_plan_batches_defaults_to_product_lines():
+    """Without lines, plan_batches uses PRODUCT_LINES."""
+    assert plan_batches(8) == plan_batches(8, lines=PRODUCT_LINES)
