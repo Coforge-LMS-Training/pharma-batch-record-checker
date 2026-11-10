@@ -70,3 +70,61 @@ def test_dockerfile_pins_its_base_images():
     )
     assert froms
     assert all(":" in image and not image.endswith(":latest") for image in froms)
+
+
+# --- docker-compose.yml -------------------------------------------------------
+
+COMPOSE = ROOT / "docker-compose.yml"
+
+
+def compose_block(name, top="services"):
+    """The text of one entry under a top-level compose key (indented 2 spaces)."""
+    text = COMPOSE.read_text(encoding="utf-8")
+    section = re.search(rf"^{top}:\n(.*?)(?=^\S|\Z)", text, re.MULTILINE | re.DOTALL)
+    assert section, f"no {top}: section"
+    entry = re.search(
+        rf"^  {name}:\n(.*?)(?=^  \S|\Z)", section.group(1), re.MULTILINE | re.DOTALL
+    )
+    assert entry, f"no {top}.{name}"
+    return entry.group(1)
+
+
+def test_postgres_has_no_profile_so_the_host_workflow_starts_only_it():
+    """`uv run pharma-review-demo` runs plain `docker compose up`: only postgres."""
+    assert "profiles:" not in compose_block("postgres")
+
+
+def test_app_and_generator_are_behind_the_app_profile():
+    """The containers start with `--profile app`, never with plain `up`."""
+    for name in ("app", "generator"):
+        assert re.search(r"profiles:\s*\[\s*\"?app\"?\s*\]", compose_block(name)), name
+
+
+def test_app_port_is_published_on_localhost_only():
+    """Notes have no CSRF protection, so the app is reachable from this machine only."""
+    ports = re.findall(r'-\s*"([^"]+:8000)"', compose_block("app"))
+    assert ports
+    assert all(port.startswith("127.0.0.1:") for port in ports)
+
+
+def test_data_volume_is_named_pharma_data():
+    """The volume's Docker name is exactly pharma_data (no project prefix)."""
+    assert re.search(r"name:\s*pharma_data\b", compose_block("pharma_data", "volumes"))
+
+
+def test_generator_writes_and_app_reads_pharma_data():
+    """The generator mounts pharma_data read-write; the app mounts it read-only."""
+    assert re.search(
+        r"-\s*pharma_data:/data\s*$", compose_block("generator"), re.MULTILINE
+    )
+    assert re.search(
+        r"-\s*pharma_data:/data:ro\s*$", compose_block("app"), re.MULTILINE
+    )
+
+
+def test_app_waits_for_the_generator_to_finish():
+    """The app loads /data only after the generator has written it successfully."""
+    assert re.search(
+        r"generator:\s*\n\s*condition:\s*service_completed_successfully",
+        compose_block("app"),
+    )
