@@ -223,4 +223,7 @@ __marimo__/
 CLAUDE.local.md
 # Client sample CSVs (top-level folder only)
 /sample/
+
+# Generated datasets (generate-batch-records --out data/); regenerate, don't commit
+/data/
 .DS_Store

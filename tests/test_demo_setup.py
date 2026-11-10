@@ -138,3 +138,145 @@ def test_compose_up_names_docker_when_it_is_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(setup.subprocess, "run", missing)
     with pytest.raises(SystemExit, match="Docker is required"):
         setup.compose_up(tmp_path)
+
+
+# --- Loading a generated data folder (--data) ---------------------------------
+
+
+def write_dataset_files(folder):
+    """Create placeholder master_record.csv and batch_record.csv in folder."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("master_record.csv", "batch_record.csv"):
+        (folder / name).write_text("x\n", encoding="utf-8")
+    return folder
+
+
+def patch_database_steps(monkeypatch, calls):
+    """Replace every database step of prepare() with a recorder in calls."""
+    monkeypatch.setenv("DATABASE_URL", setup.LOCAL_APP_URL)
+    monkeypatch.setenv("DATABASE_ADMIN_URL", setup.LOCAL_ADMIN_URL)
+    monkeypatch.setattr(setup, "repo_root", lambda: Path("/repo"))
+    monkeypatch.setattr(setup, "postgres_accepts", lambda url: False)
+    monkeypatch.setattr(setup, "compose_up", lambda root: calls.append("compose"))
+    monkeypatch.setattr(setup, "migrate", lambda root: calls.append("migrate"))
+    monkeypatch.setattr(
+        setup,
+        "load_sample",
+        lambda root: (_ for _ in ()).throw(AssertionError("sample must not load")),
+    )
+
+
+def test_load_dataset_passes_the_folder_csvs(monkeypatch, tmp_path):
+    """load_dataset reviews and stores the folder's master and batch CSVs."""
+    seen = []
+    monkeypatch.setattr(
+        "pharma_batch_record_checker.store.load.load_and_review",
+        lambda master, batch, store: seen.append((master, batch)),
+    )
+    assert setup.load_dataset(tmp_path) is False
+    assert seen == [(tmp_path / "master_record.csv", tmp_path / "batch_record.csv")]
+
+
+def test_load_dataset_treats_duplicate_as_already_stored(monkeypatch, tmp_path):
+    """DuplicateRecord means something in the folder is already stored."""
+
+    def already_there(*args):
+        raise DuplicateRecord("batch B26-0001 already exists")
+
+    monkeypatch.setattr(
+        "pharma_batch_record_checker.store.load.load_and_review", already_there
+    )
+    assert setup.load_dataset(tmp_path) is True
+
+
+def test_load_sample_loads_the_approved_folder(monkeypatch, tmp_path):
+    """load_sample is load_dataset on fixtures/approved_sample."""
+    seen = []
+    monkeypatch.setattr(setup, "load_dataset", lambda folder: seen.append(folder))
+    setup.load_sample(tmp_path)
+    assert seen == [tmp_path / "fixtures" / "approved_sample"]
+
+
+def test_check_dataset_names_missing_files_and_the_generator_command(tmp_path):
+    """A folder without the CSVs gets one message with the command that makes them."""
+    with pytest.raises(SystemExit) as excinfo:
+        setup.check_dataset(tmp_path)
+    message = str(excinfo.value)
+    assert "master_record.csv" in message
+    assert "batch_record.csv" in message
+    assert f"uv run generate-batch-records --out {tmp_path}" in message
+    setup.check_dataset(write_dataset_files(tmp_path))
+
+
+def test_prepare_loads_the_data_folder_instead_of_the_sample(
+    monkeypatch, tmp_path, capsys
+):
+    """With data, prepare migrates, then loads that folder and not the sample."""
+    calls = []
+    patch_database_steps(monkeypatch, calls)
+    monkeypatch.setattr(
+        setup, "load_dataset", lambda folder: calls.append(("load", folder)) or False
+    )
+    data = write_dataset_files(tmp_path / "data")
+    setup.prepare(data)
+    assert calls == ["compose", "migrate", ("load", data)]
+    assert f"Loaded {data}." in capsys.readouterr().out
+
+
+def test_prepare_checks_data_before_starting_postgres(monkeypatch, tmp_path):
+    """A missing data folder stops before Docker or migrations run."""
+    calls = []
+    patch_database_steps(monkeypatch, calls)
+    with pytest.raises(SystemExit, match="generate-batch-records"):
+        setup.prepare(tmp_path / "missing")
+    assert calls == []
+
+
+def test_prepare_explains_an_overlapping_dataset(monkeypatch, tmp_path, capsys):
+    """If the folder overlaps stored data, prepare says how to start empty."""
+    patch_database_steps(monkeypatch, [])
+    monkeypatch.setattr(setup, "load_dataset", lambda folder: True)
+    data = write_dataset_files(tmp_path / "data")
+    setup.prepare(data)
+    out = capsys.readouterr().out
+    assert f"Nothing new loaded from {data}" in out
+    assert "docker compose down -v" in out
+
+
+def fake_app(order):
+    """An app whose run() records its call in order instead of serving."""
+    return type("App", (), {"run": lambda self, **kwargs: order.append("run")})()
+
+
+def test_main_passes_data_to_prepare(monkeypatch):
+    """--data DIR prepares that folder, then serves."""
+    monkeypatch.setattr("sys.argv", ["pharma-review-demo", "--data", "data"])
+    order = []
+    monkeypatch.setattr(cli, "prepare", lambda *args: order.append(("prepare", args)))
+    monkeypatch.setattr(cli, "create_app", lambda: fake_app(order))
+    cli.main()
+    assert order == [("prepare", (Path("data"),)), "run"]
+
+
+def test_main_without_data_prepares_the_sample(monkeypatch):
+    """Without --data, prepare gets no arguments and loads the approved sample."""
+    monkeypatch.setattr("sys.argv", ["pharma-review-demo"])
+    order = []
+    monkeypatch.setattr(cli, "prepare", lambda *args: order.append(("prepare", args)))
+    monkeypatch.setattr(cli, "create_app", lambda: fake_app(order))
+    cli.main()
+    assert order == [("prepare", ()), "run"]
+
+
+def test_data_with_no_setup_is_a_usage_error(monkeypatch, capsys):
+    """--data needs setup to load anything, so --no-setup with it is refused."""
+    monkeypatch.setattr(
+        "sys.argv", ["pharma-review-demo", "--data", "data", "--no-setup"]
+    )
+    monkeypatch.setattr(
+        cli, "create_app", lambda: (_ for _ in ()).throw(AssertionError("served"))
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 2
+    assert "--data" in capsys.readouterr().err

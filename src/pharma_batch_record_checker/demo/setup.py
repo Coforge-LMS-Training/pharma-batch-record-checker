@@ -2,8 +2,9 @@
 
 A fresh clone has no tables and no sample. This module fills in the local
 URLs, starts the Compose Postgres when it is not already accepting
-connections, applies the migrations, and loads the approved sample. A sample
-that is already stored is left as it is.
+connections, applies the migrations, and loads the approved sample, or a
+generated data folder instead when one is given. Rows that are already stored
+are left as they are.
 """
 
 import os
@@ -16,9 +17,20 @@ import psycopg
 LOCAL_APP_URL = "postgresql://pharma_app:pharma_app@localhost:5432/pharma"
 LOCAL_ADMIN_URL = "postgresql://pharma_admin:pharma_admin@localhost:5432/pharma"
 
+# The two files a dataset folder must hold, master first. The app does not
+# import the generator, so the names are written here, as in the CSV contract.
+DATASET_FILES = ("master_record.csv", "batch_record.csv")
 
-def prepare() -> None:
-    """Make the local database ready, then return."""
+
+def prepare(data: Path | None = None) -> None:
+    """Make the local database ready, then return.
+
+    With data, load that folder (e.g. one written by generate-batch-records)
+    instead of the approved sample. The folder is checked before Postgres
+    starts, so a wrong path fails fast.
+    """
+    if data is not None:
+        check_dataset(data)
     os.environ.setdefault("DATABASE_URL", LOCAL_APP_URL)
     os.environ.setdefault("DATABASE_ADMIN_URL", LOCAL_ADMIN_URL)
     root = repo_root()
@@ -27,7 +39,17 @@ def prepare() -> None:
         compose_up(root)
     print("Applying migrations...")
     migrate(root)
-    if load_sample(root):
+    if data is not None:
+        if load_dataset(data):
+            print(
+                f"Nothing new loaded from {data}: its masters or batches are "
+                "already stored. The generated masters match the approved "
+                "sample's, so start from an empty local database to view only "
+                "this dataset: docker compose down -v, then run this command again."
+            )
+        else:
+            print(f"Loaded {data}.")
+    elif load_sample(root):
         print("Approved sample is already loaded.")
     else:
         print("Loaded the approved sample.")
@@ -106,17 +128,31 @@ def migrate(root: Path) -> None:
 
 def load_sample(root: Path) -> bool:
     """Load the approved sample. Return True when it was already stored."""
+    return load_dataset(root / "fixtures" / "approved_sample")
+
+
+def check_dataset(folder: Path) -> None:
+    """Stop with one message if folder lacks the master or batch CSV."""
+    missing = [name for name in DATASET_FILES if not (folder / name).is_file()]
+    if missing:
+        raise SystemExit(
+            f"{folder} has no {' or '.join(missing)}. "
+            f"Run: uv run generate-batch-records --out {folder}"
+        )
+
+
+def load_dataset(folder: Path) -> bool:
+    """Review and store folder's master and batch CSVs.
+
+    Return True when DuplicateRecord says something in them is already stored.
+    """
     from pharma_batch_record_checker.store.errors import DuplicateRecord
     from pharma_batch_record_checker.store.load import load_and_review
     from pharma_batch_record_checker.store.review_store import PostgresReviewStore
 
-    sample = root / "fixtures" / "approved_sample"
+    master, batch = (folder / name for name in DATASET_FILES)
     try:
-        load_and_review(
-            sample / "master_record.csv",
-            sample / "batch_record.csv",
-            PostgresReviewStore(),
-        )
+        load_and_review(master, batch, PostgresReviewStore())
     except DuplicateRecord:
         return True
     return False
