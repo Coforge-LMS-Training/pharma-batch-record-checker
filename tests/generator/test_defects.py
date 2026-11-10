@@ -17,6 +17,8 @@ from pharma_batch_record_checker.generator.batches import (
 )
 from pharma_batch_record_checker.generator.defects import (
     INSTRUCTION_COMMENTS,
+    OUT_OF_ORDER_GAP,
+    VERIFY_LATE,
     Defect,
     plant_defects,
 )
@@ -339,3 +341,86 @@ def test_same_person_needs_a_performer():
     ]
     with pytest.raises(ValueError, match="no performer to copy"):
         plant_defects(master, clean, defects, DefectLog())
+
+
+# --- Version-2 rules: late_verification and performed_out_of_order -----------
+
+
+def test_plant_late_verification_on_a_critical_step():
+    """Verified 65 minutes after performing (limit 60): one Needs Review finding."""
+    _, clean, rows = check_single(Defect("S-COMP-01", "late_verification"))
+    row, before = row_for(rows, "S-COMP-01"), row_for(clean, "S-COMP-01")
+    assert row.verified_at - row.performed_at == VERIFY_LATE == timedelta(minutes=65)
+    assert row.verified_by == before.verified_by
+    assert row.performed_at == before.performed_at
+
+
+def test_plant_late_verification_adds_a_verifier_to_a_non_critical_step():
+    """Non-critical steps have no verifier yet; one is added, verified late."""
+    _, clean, rows = check_single(Defect("S-GRAN-03", "late_verification"))
+    assert row_for(clean, "S-GRAN-03").verified_by is None
+    row = row_for(rows, "S-GRAN-03")
+    assert row.verified_by == VERIFIERS[0]
+    assert row.verified_at - row.performed_at == VERIFY_LATE
+
+
+def test_plant_performed_out_of_order_before_the_previous_step():
+    """Performed 20 minutes before the previous step; the verify delay is kept."""
+    _, clean, rows = check_single(Defect("S-GRAN-02", "performed_out_of_order"))
+    row, before = row_for(rows, "S-GRAN-02"), row_for(clean, "S-GRAN-02")
+    previous = row_for(rows, "S-GRAN-01")
+    assert row.performed_at == previous.performed_at - OUT_OF_ORDER_GAP
+    assert OUT_OF_ORDER_GAP == timedelta(minutes=20)
+    assert row.verified_at == before.verified_at  # non-critical: still blank
+
+
+def test_plant_performed_out_of_order_keeps_a_critical_steps_verify_delay():
+    """Shifting a verified step moves its verification too: never late or early."""
+    _, clean, rows = check_single(Defect("S-COMP-01", "performed_out_of_order"))
+    row, before = row_for(rows, "S-COMP-01"), row_for(clean, "S-COMP-01")
+    assert (
+        row.verified_at - row.performed_at == before.verified_at - before.performed_at
+    )
+
+
+def test_performed_out_of_order_skips_a_missing_previous_step():
+    """With S-GRAN-01 missing, S-GRAN-02 is planted before S-DISP-02 instead."""
+    master, _, rows, log = plant(
+        [
+            Defect("S-GRAN-02", "performed_out_of_order"),
+            Defect("S-GRAN-01", "missing_step"),
+        ]
+    )
+    row = row_for(rows, "S-GRAN-02")
+    assert (
+        row.performed_at == row_for(rows, "S-DISP-02").performed_at - OUT_OF_ORDER_GAP
+    )
+    assert sorted(rule_violations(master, rows)) == [
+        "missing_step:S-GRAN-01",
+        "performed_out_of_order:S-GRAN-02",
+    ]
+    assert sorted(expected(log)) == [
+        ("S-GRAN-01", "missing_step", NEEDS_REVIEW),
+        ("S-GRAN-02", "performed_out_of_order", NEEDS_REVIEW),
+    ]
+
+
+def test_performed_out_of_order_refused_on_the_first_step():
+    """The first step has nothing before it."""
+    with pytest.raises(ValueError, match="first step"):
+        plant([Defect("S-DISP-01", "performed_out_of_order")])
+
+
+def test_both_v2_rules_on_one_step_are_two_critical_findings():
+    """Late and out of order on one step: two findings, so the step is Critical."""
+    master, _, rows, log = plant(
+        [
+            Defect("S-COMP-02", "late_verification"),
+            Defect("S-COMP-02", "performed_out_of_order"),
+        ]
+    )
+    assert sorted(rule_violations(master, rows)) == [
+        "late_verification:S-COMP-02",
+        "performed_out_of_order:S-COMP-02",
+    ]
+    assert {severity for _, _, severity in expected(log)} == {CRITICAL}
