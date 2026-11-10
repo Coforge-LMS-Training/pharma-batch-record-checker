@@ -4,16 +4,20 @@ import csv
 import dataclasses
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import datetime
+from itertools import pairwise
 
 import pytest
 
 import pharma_batch_record_checker.generator.cli as cli_module
 from pharma_batch_record_checker.generator.cli import (
+    CHANGEOVER,
     MAX_BATCHES,
     PRODUCT_LINES,
     ProductLine,
+    batch_span,
     main,
+    parse_start,
     plan_batches,
 )
 from pharma_batch_record_checker.generator.dataset_io import (
@@ -28,6 +32,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
 )
 from pharma_batch_record_checker.generator.masters import SYN500
 from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
+from tests.generator.rule_oracle import rule_violations
 
 # --- Planning N batches -------------------------------------------------------
 
@@ -72,20 +77,67 @@ def test_four_batches_cover_all_eight_rules():
     assert {f.rule_id for f in dataset.findings} == set(RULE_IDS)
 
 
-def test_start_times_are_deterministic():
-    """A product's k-th batch starts at 07:00 on day k, from 2026-10-12."""
-    starts = {p.batch_id: p.start for p in plan_batches(4)}
+def test_start_times_follow_back_to_back_schedule():
+    """Each line starts its next batch one span plus a changeover after the last.
+
+    Tablet cycle is 10 h 50 min, capsule 7 h 50 min, both from 2026-10-12 07:00.
+    """
+    starts = {p.batch_id: p.start for p in plan_batches(6)}
     assert starts == {
         "B26-0001": datetime(2026, 10, 12, 7, 0),
         "P26-0001": datetime(2026, 10, 12, 7, 0),
-        "B26-0002": datetime(2026, 10, 13, 7, 0),
-        "P26-0002": datetime(2026, 10, 13, 7, 0),
+        "B26-0002": datetime(2026, 10, 12, 17, 50),
+        "P26-0002": datetime(2026, 10, 12, 14, 50),
+        "B26-0003": datetime(2026, 10, 13, 4, 40),
+        "P26-0003": datetime(2026, 10, 12, 22, 40),
     }
+
+
+def by_line(plans):
+    """Plans grouped by master_record_id, in plan order."""
+    grouped = {}
+    for plan in plans:
+        grouped.setdefault(plan.product.master_record_id, []).append(plan)
+    return grouped
+
+
+def rows_by_batch(dataset):
+    """The dataset's batch rows grouped by batch_id."""
+    grouped = {}
+    for row in dataset.batches:
+        grouped.setdefault(row.batch_id, []).append(row)
+    return grouped
+
+
+def test_each_line_waits_for_previous_batch():
+    """On a line, starts are batch_span + CHANGEOVER apart and never overlap.
+
+    The gap is fixed by the plan, and the generated rows of each batch finish
+    (performed and verified) before the next batch on its line starts.
+    """
+    plans = plan_batches(20)
+    rows = rows_by_batch(build_dataset(0, plans))
+    for line in by_line(plans).values():
+        for prev, nxt in pairwise(line):
+            assert nxt.start - prev.start == batch_span(prev.product) + CHANGEOVER
+            times = [r.performed_at for r in rows[prev.batch_id]] + [
+                r.verified_at for r in rows[prev.batch_id]
+            ]
+            assert max(t for t in times if t is not None) < nxt.start
+
+
+def test_clean_batch_crossing_midnight_is_unflagged():
+    """P26-0003 runs from 22:40 past midnight and still breaks none of the 8 rules."""
+    dataset = build_dataset(0, plan_batches(8))
+    rows = rows_by_batch(dataset)["P26-0003"]
+    assert len({r.performed_at.date() for r in rows if r.performed_at}) == 2
+    master = [m for m in dataset.masters if m.master_record_id == "MBR-PLC250"]
+    assert rule_violations(master, rows) == []
 
 
 @pytest.mark.parametrize("n", [0, -1, MAX_BATCHES + 1])
 def test_rejects_n_outside_range(n):
-    """N must be 1 to MAX_BATCHES (so every batch starts in 2026)."""
+    """N must be 1 to MAX_BATCHES, a plain sanity limit."""
     with pytest.raises(ValueError, match="batches"):
         plan_batches(n)
 
@@ -193,6 +245,75 @@ def test_rejects_bad_batches(bad, tmp_path, capsys):
     assert "--batches" in capsys.readouterr().err
 
 
+def first_performed_at(out):
+    """{batch_id: performed_at of its first row} from out/batch_record.csv."""
+    firsts = {}
+    with (out / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            firsts.setdefault(row["batch_id"], row["performed_at"])
+    return firsts
+
+
+def test_start_option_moves_dates(tmp_path):
+    """--start changes the dates; the same flags still give byte-identical files."""
+    run(tmp_path / "a", "--batches", "8")
+    run(tmp_path / "b", "--batches", "8", "--start", "2026-12-31T07:00")
+    run(tmp_path / "c", "--batches", "8", "--start", "2026-12-31T07:00")
+    assert files_of(tmp_path / "a")[BATCH_FILE] != files_of(tmp_path / "b")[BATCH_FILE]
+    assert files_of(tmp_path / "b") == files_of(tmp_path / "c")
+    assert "B27-0001" in batch_ids_in(tmp_path / "b")
+    assert first_performed_at(tmp_path / "b")["B26-0001"] == "2026-12-31T07:00"
+
+
+def test_default_start_is_2026_10_12_0700(tmp_path):
+    """Without --start, the files equal those of --start 2026-10-12T07:00."""
+    run(tmp_path / "a", "--batches", "6")
+    run(tmp_path / "b", "--batches", "6", "--start", "2026-10-12T07:00")
+    assert files_of(tmp_path / "a") == files_of(tmp_path / "b")
+
+
+def test_seed_does_not_change_ids_or_start_times(tmp_path):
+    """--seed changes readings only: batch IDs and start times stay the same."""
+    run(tmp_path / "a", "--seed", "3", "--batches", "8")
+    run(tmp_path / "b", "--seed", "4", "--batches", "8")
+    assert first_performed_at(tmp_path / "a") == first_performed_at(tmp_path / "b")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "2026-10-12 07:00",
+        "2026-10-12T07:00:30",
+        "2026-10-12T07:00Z",
+        "2026-1-5T7:00",
+        "1999-12-31T07:00",
+        "2100-01-01T07:00",
+        "x",
+    ],
+)
+def test_rejects_bad_start(bad, tmp_path, capsys):
+    """--start must be canonical YYYY-MM-DDTHH:MM, year 2000-2099; else a usage error."""
+    with pytest.raises(ValueError, match="start"):
+        parse_start(bad)
+    with pytest.raises(SystemExit) as excinfo:
+        run(tmp_path, "--start", bad)
+    assert excinfo.value.code == 2
+    assert "argument --start" in capsys.readouterr().err
+    assert not (tmp_path / BATCH_FILE).exists()
+
+
+def test_parse_start_accepts_canonical_timestamp():
+    """A canonical timestamp parses to the same naive datetime."""
+    assert parse_start("2026-12-31T07:00") == datetime(2026, 12, 31, 7, 0)
+    assert parse_start("2099-12-31T23:59") == datetime(2099, 12, 31, 23, 59)
+
+
+def test_plan_batches_rejects_start_outside_2000s():
+    """plan_batches also refuses a start year that a two-digit YY can't name."""
+    with pytest.raises(ValueError, match="start"):
+        plan_batches(1, datetime(1999, 12, 31, 7, 0))
+
+
 def test_runs_as_module_byte_identical_twice(tmp_path):
     """As a separate process, the same arguments give byte-identical files."""
     for name in ("a", "b"):
@@ -218,10 +339,10 @@ def test_runs_as_module_byte_identical_twice(tmp_path):
 
 
 def test_batch_ids_use_product_line_prefix():
-    """Each product line declares its batch-ID prefix explicitly."""
+    """Each product line declares its batch-ID letter; the year comes from the date."""
     assert [(line.product.master_record_id, line.prefix) for line in PRODUCT_LINES] == [
-        ("MBR-SYN500", "B26"),
-        ("MBR-PLC250", "P26"),
+        ("MBR-SYN500", "B"),
+        ("MBR-PLC250", "P"),
     ]
 
 
@@ -229,7 +350,7 @@ def test_product_without_defect_plan_gets_clean_batches(monkeypatch):
     """A product line with no defect plan only produces clean batches."""
     other = dataclasses.replace(SYN500, master_record_id="MBR-TST100")
     monkeypatch.setattr(
-        cli_module, "PRODUCT_LINES", (ProductLine(other, "T26", defect_plan=None),)
+        cli_module, "PRODUCT_LINES", (ProductLine(other, "T", defect_plan=None),)
     )
     plans = plan_batches(4)
     assert [p.batch_id for p in plans] == [
@@ -249,11 +370,65 @@ def test_three_batches_are_the_minimum_for_all_eight_rules():
     assert build_dataset(0, plan_batches(2)).findings == []
 
 
-def test_all_start_dates_stay_in_2026():
-    """Even at the maximum, every batch starts in 2026, matching the '26' in its ID."""
+def test_batch_id_year_matches_start_year():
+    """Every ID's two-digit year is its start year, even at MAX_BATCHES (past 2026)."""
     plans = plan_batches(MAX_BATCHES)
-    assert {p.start.year for p in plans} == {2026}
-    assert max(p.start for p in plans).date() == date(2026, 12, 31)
+    for plan in plans:
+        assert plan.batch_id[1:3] == f"{plan.start:%y}"
+    assert {p.start.year for p in plans} > {2026}
+
+
+def test_max_batches_is_a_plain_sanity_limit():
+    """The cap no longer depends on days left in 2026."""
+    assert MAX_BATCHES == 9999
+
+
+NEW_YEAR_START = datetime(2026, 12, 31, 7, 0)
+
+
+def test_ids_restart_at_new_year():
+    """A line's sequence restarts at 0001 when its start year changes."""
+    plans = plan_batches(8, NEW_YEAR_START)
+    assert ids(plans) == [
+        "B26-0001",
+        "P26-0001",
+        "B26-0002",
+        "P26-0002",
+        "B27-0001",
+        "P26-0003",
+        "B27-0002",
+        "P27-0001",
+    ]
+    starts = {p.batch_id: p.start for p in plans}
+    assert starts["B27-0001"] == datetime(2027, 1, 1, 4, 40)
+    assert starts["P26-0003"] == datetime(2026, 12, 31, 22, 40)
+    assert starts["P27-0001"] == datetime(2027, 1, 1, 6, 30)
+
+
+def test_defects_follow_line_position_across_new_year():
+    """Defects go on a line's even positions, not its even sequence numbers.
+
+    B27-0002 is the line's 4th batch, so it is defective even though its
+    sequence number restarted at the new year.
+    """
+    plans = plan_batches(8, NEW_YEAR_START)
+    assert [bool(p.defects) for p in plans] == [
+        False,
+        False,
+        True,
+        True,
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert {p.batch_id: bool(p.defects) for p in plans}["B27-0002"]
+
+
+def test_first_batch_of_each_line_starts_at_start():
+    """Both lines' first batches start exactly at the given start."""
+    plans = plan_batches(2, NEW_YEAR_START)
+    assert [p.start for p in plans] == [NEW_YEAR_START, NEW_YEAR_START]
 
 
 def test_unwritable_out_reports_error(tmp_path, capsys):
