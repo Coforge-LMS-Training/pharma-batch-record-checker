@@ -1,0 +1,30 @@
+# Invented product: a tablet on the tablet template, with the standard tablet defects.
+
+master_record_id = "MBR-FTP040"
+master_version   = "1"
+product_name     = "Fictoprin 40 mg film-coated tablets"
+batch_size       = "400000"
+batch_size_unit  = "tablets"
+excipient        = "microcrystalline cellulose"
+template         = "tablet"
+id_letter        = "F"
+defect_plan      = "tablet_standard"
+
+# step_id = [min, max] for every measured step; units come from the template.
+# tablet_standard needs a min on S-GRAN-01 and a max on S-GRAN-02 and S-COMP-01.
+[limits]
+"S-DISP-01"  = ["15.92", "16.08"]   # API net weight, kg
+"S-DISP-02"  = ["5.97", "6.03"]     # excipient net weight, kg
+"S-GRAN-01"  = ["4.0", "5.0"]       # water added, L
+"S-GRAN-02"  = ["120", "180"]       # impeller speed, rpm
+"S-GRAN-03"  = ["3", "5"]           # granulation time, min
+"S-GRAN-04"  = ["50", "60"]         # inlet air temperature, degC
+"S-GRAN-05"  = ["1.0", "2.0"]       # loss on drying, %
+"S-BLEND-01" = ["8", "12"]          # blend time, min
+"S-BLEND-02" = ["10", "14"]         # blender speed, rpm
+"S-COMP-01"  = ["95", "105"]        # tablet weight, mg
+"S-COMP-02"  = ["4.0", "7.0"]       # tablet hardness, kP
+"S-COMP-03"  = ["2.8", "3.2"]       # tablet thickness, mm
+"S-COAT-01"  = ["50", "60"]         # inlet air temperature, degC
+"S-COAT-02"  = ["2.0", "3.0"]       # coating weight gain, %
+"S-PACK-02"  = ["99.5", "100.5"]    # label count reconciliation, %

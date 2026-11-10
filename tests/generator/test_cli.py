@@ -2,23 +2,29 @@
 
 import csv
 import dataclasses
+import shutil
 import subprocess
 import sys
 from datetime import datetime
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
 import pharma_batch_record_checker.generator.cli as cli_module
+from pharma_batch_record_checker.generator.catalog import CatalogProduct, load_catalog
 from pharma_batch_record_checker.generator.cli import (
     CHANGEOVER,
     MAX_BATCHES,
     PRODUCT_LINES,
     ProductLine,
     batch_span,
+    batches_for_rules,
+    extra_lines,
     main,
     parse_start,
     plan_batches,
+    summarize,
 )
 from pharma_batch_record_checker.generator.dataset_io import (
     BATCH_FILE,
@@ -31,7 +37,12 @@ from pharma_batch_record_checker.generator.expected_findings import (
     RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import SYN500
-from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
+from pharma_batch_record_checker.schema import (
+    BATCH_HEADER,
+    MASTER_HEADER,
+    BatchRow,
+    MasterRow,
+)
 from tests.generator.rule_oracle import rule_violations
 
 # --- Planning N batches -------------------------------------------------------
@@ -219,13 +230,94 @@ def test_leaves_other_files_alone(tmp_path):
     assert (tmp_path / "notes.txt").read_text() == "keep me"
 
 
-def test_summary_line(tmp_path, capsys):
-    """The command prints one deterministic summary line."""
-    run(tmp_path, "--seed", "0", "--batches", "4")
+def summary_of(tmp_path, capsys, *args):
+    """The lines the command prints for --out tmp_path plus args."""
+    run(tmp_path, *args)
+    return capsys.readouterr().out.splitlines()
+
+
+def expected_rows(out):
+    """Rows of out/expected_findings.csv as dicts."""
+    with (out / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_summary_first_line_is_unchanged(tmp_path, capsys):
+    """The first line still says how many batches and findings went where."""
     expected = len(build_dataset(0, plan_batches(4)).findings)
-    assert capsys.readouterr().out == (
-        f"wrote 4 batches, {expected} expected findings to {tmp_path}\n"
+    lines = summary_of(tmp_path, capsys, "--seed", "0", "--batches", "4")
+    assert lines[0] == f"wrote 4 batches, {expected} expected findings to {tmp_path}"
+
+
+def test_summary_is_deterministic(tmp_path, capsys):
+    """The same arguments print the same summary (apart from --out)."""
+    a = summary_of(tmp_path / "a", capsys, "--batches", "6")
+    b = summary_of(tmp_path / "b", capsys, "--batches", "6")
+    assert a[1:-1] == b[1:-1]
+
+
+def test_summary_lists_each_product_line(tmp_path, capsys):
+    """One line per product: letter, master, name, batches and defective batches."""
+    lines = summary_of(tmp_path, capsys, "--batches", "5")
+    assert lines[1] == "  products:"
+    b_line, p_line = lines[2], lines[3]
+    assert b_line.split()[:3] == ["B", "MBR-SYN500", "v3"]
+    assert "Synthetol 500 mg film-coated tablets" in b_line
+    assert b_line.endswith("3 batches, 1 defective")
+    assert p_line.split()[:3] == ["P", "MBR-PLC250", "v1"]
+    assert p_line.endswith("2 batches, 1 defective")
+
+
+def test_summary_counts_findings_by_severity_steps_and_rule(tmp_path, capsys):
+    """Severity, flagged-step and per-rule counts match expected_findings.csv."""
+    lines = summary_of(tmp_path, capsys, "--batches", "4")
+    rows = expected_rows(tmp_path)
+    critical = sum(r["severity"] == "Critical" for r in rows)
+    steps = len({(r["batch_id"], r["step_id"]) for r in rows})
+    assert (
+        f"  findings: {critical} Critical, {len(rows) - critical} Needs Review, "
+        f"on {steps} steps"
+    ) in lines
+    per_rule = ", ".join(
+        f"{rule} {sum(r['rule_id'] == rule for r in rows)}" for rule in RULE_IDS
     )
+    assert f"  rules: {per_rule} (all 8 planted)" in lines
+
+
+def test_summary_names_rules_that_were_not_planted():
+    """When some rules have no finding, the summary says which."""
+    capsule_defects = plan_batches(4)[3:4]  # P26-0002 only: no missing_reading
+    text = summarize(build_dataset(0, capsule_defects), Path("out"), PRODUCT_LINES[1:])
+    assert "not planted: missing_reading" in text
+    assert "no plan in use has: missing_reading" in text
+
+
+def test_summary_explains_a_dataset_without_defects(tmp_path, capsys):
+    """With only first batches, there are no findings, and the summary says why."""
+    lines = summary_of(tmp_path, capsys, "--batches", "2")
+    assert (
+        "  findings: none (a line's defects start at its 2nd batch; "
+        "use --batches 3 or more)"
+    ) in lines
+    assert not any(line.startswith("  rules:") for line in lines)
+    assert lines[2].endswith("1 batch, 0 defective")
+
+
+def test_summary_shows_the_time_span_and_files(tmp_path, capsys):
+    """The first and last timestamps in the batch file, and the three files."""
+    lines = summary_of(tmp_path, capsys, "--batches", "4")
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    stamps = [r[c] for r in rows for c in ("performed_at", "verified_at") if r[c]]
+    assert f"  time span: {min(stamps)} to {max(stamps)}" in lines
+    assert lines[-1] == f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}"
+
+
+def test_summary_lists_catalog_products_too(tmp_path, capsys):
+    """Catalog products get their own lines, after B and P."""
+    lines = summary_of(tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG))
+    letters = [line.split()[0] for line in lines[2:7]]
+    assert letters == ["B", "P", "L", "F", "M"]
 
 
 def test_out_is_required(capsys):
@@ -439,3 +531,446 @@ def test_unwritable_out_reports_error(tmp_path, capsys):
     err = capsys.readouterr().err
     assert err.startswith("generate-batch-records: error: cannot write to ")
     assert "Traceback" not in err
+
+
+# --- Product lines passed in (for --catalog) ----------------------------------
+
+TST_LINE = ProductLine(
+    dataclasses.replace(SYN500, master_record_id="MBR-TST100"), "T", defect_plan=None
+)
+
+
+def test_plan_batches_uses_given_lines():
+    """Given lines alternate in order; each counts its own IDs from 0001."""
+    plans = plan_batches(6, lines=(*PRODUCT_LINES, TST_LINE))
+    assert ids(plans) == [
+        "B26-0001",
+        "P26-0001",
+        "T26-0001",
+        "B26-0002",
+        "P26-0002",
+        "T26-0002",
+    ]
+    assert not any(p.defects for p in plans if p.batch_id.startswith("T"))
+
+
+def test_plan_batches_defaults_to_product_lines():
+    """Without lines, plan_batches uses PRODUCT_LINES."""
+    assert plan_batches(8) == plan_batches(8, lines=PRODUCT_LINES)
+
+
+# --- Extra products from the catalog (--catalog) ------------------------------
+
+CATALOG = Path(__file__).resolve().parents[2] / "catalog"
+TABLET_PLAN = load_catalog(CATALOG).plans["tablet_standard"]
+
+
+def catalog_product(base=SYN500, prefix="S", plan=None, **changes):
+    """A CatalogProduct copied from a built-in product, as MBR-NEW100 unless changed."""
+    config = dataclasses.replace(base, **{"master_record_id": "MBR-NEW100", **changes})
+    return CatalogProduct(config, prefix, plan)
+
+
+def test_extra_line_carries_the_catalog_plan():
+    """A product's catalog plan becomes its line's defect plan, on its product."""
+    item = catalog_product(plan=TABLET_PLAN)
+    (line,) = extra_lines((item,))
+    assert line.prefix == "S"
+    assert line.product == item.product
+    assert line.defect_plan.product == item.product
+    assert line.defect_plan.defects == TABLET_PLAN.defects
+    assert dict(line.defect_plan.comments) == dict(TABLET_PLAN.comments)
+
+
+def test_extra_line_without_a_plan_is_clean_only():
+    """A catalog product without a defect plan only gets clean batches."""
+    (line,) = extra_lines((catalog_product(),))
+    assert line.defect_plan is None
+
+
+@pytest.mark.parametrize(
+    ("products", "reason"),
+    [
+        ((catalog_product(prefix="B"),), "letter B"),
+        (
+            (catalog_product(), catalog_product(master_record_id="MBR-NEW200")),
+            "letter S",
+        ),
+        (
+            (catalog_product(master_record_id="MBR-SYN500", master_version="3"),),
+            "MBR-SYN500 v3",
+        ),
+        (
+            (catalog_product(), catalog_product(prefix="T")),
+            "MBR-NEW100 v3",
+        ),
+        (
+            (
+                catalog_product(
+                    plan=TABLET_PLAN,
+                    limits={**SYN500.limits, "S-GRAN-01": ("", "20.0")},
+                ),
+            ),
+            "S-GRAN-01",
+        ),
+    ],
+    ids=[
+        "builtin_letter",
+        "duplicate_letter",
+        "builtin_master",
+        "duplicate_master",
+        "plan_cannot_plant",
+    ],
+)
+def test_extra_lines_refuses_clashes_and_unplantable_plans(products, reason):
+    """Clashing letters or masters, and plans the limits can't take, are refused."""
+    with pytest.raises(ValueError, match=reason):
+        extra_lines(products)
+
+
+def master_ids_in(out):
+    """Distinct master_record_ids in out/master_record.csv, in order."""
+    with (out / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        return list(dict.fromkeys(r["master_record_id"] for r in csv.DictReader(f)))
+
+
+def flagged_batches_in(out):
+    """Batch IDs that have rows in out/expected_findings.csv."""
+    with (out / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        return {r["batch_id"] for r in csv.DictReader(f)}
+
+
+def test_without_catalog_only_built_in_masters(tmp_path):
+    """No --catalog flag: only the two built-in products are generated."""
+    run(tmp_path, "--batches", "6")
+    assert master_ids_in(tmp_path) == ["MBR-SYN500", "MBR-PLC250"]
+
+
+def test_catalog_adds_its_products_after_the_built_ins(tmp_path):
+    """--catalog adds one line per product file, in file-name order, after B and P."""
+    run(tmp_path, "--batches", "11", "--catalog", str(CATALOG))
+    assert master_ids_in(tmp_path) == [
+        "MBR-SYN500",
+        "MBR-PLC250",
+        "MBR-EXL005",
+        "MBR-FTP040",
+        "MBR-MKZ075",
+    ]
+    assert batch_ids_in(tmp_path) == [
+        "B26-0001",
+        "P26-0001",
+        "L26-0001",
+        "F26-0001",
+        "M26-0001",
+        "B26-0002",
+        "P26-0002",
+        "L26-0002",
+        "F26-0002",
+        "M26-0002",
+        "B26-0003",
+    ]
+    assert flagged_batches_in(tmp_path) == {
+        "B26-0002",
+        "P26-0002",
+        "L26-0002",
+        "F26-0002",
+    }
+
+
+def test_catalog_output_matches_the_rule_check(tmp_path):
+    """For every batch, the oral liquid ones included, the rules find what's expected."""
+    run(tmp_path, "--batches", "11", "--catalog", str(CATALOG))
+    with (tmp_path / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        masters = [MasterRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        batches = [BatchRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        expected = list(csv.DictReader(f))
+    by_batch = {}
+    for row in batches:
+        by_batch.setdefault(row.batch_id, []).append(row)
+    assert len(by_batch) == 11
+    for batch_id, rows in by_batch.items():
+        master = [m for m in masters if m.master_record_id == rows[0].master_record_id]
+        found = sorted(
+            tuple(reversed(f.split(":"))) for f in rule_violations(master, rows)
+        )
+        listed = sorted(
+            (e["step_id"], e["rule_id"]) for e in expected if e["batch_id"] == batch_id
+        )
+        assert found == listed, batch_id
+
+
+def test_same_catalog_gives_byte_identical_files(tmp_path):
+    """The catalog is part of what fixes the output."""
+    for name in ("a", "b"):
+        run(tmp_path / name, "--batches", "6", "--catalog", str(CATALOG))
+    assert files_of(tmp_path / "a") == files_of(tmp_path / "b")
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('id_letter        = "F"', 'id_letter        = "B"'),
+        ('"S-COMP-01"  = ["95", "105"]', '"S-COMP-01"  = [95, 105]'),
+        (
+            'defect_plan      = "tablet_standard"',
+            'defect_plan      = "capsule_standard"',
+        ),
+    ],
+    ids=["builtin_letter", "numeric_limit", "plan_for_other_template"],
+)
+def test_bad_catalog_is_a_usage_error(old, new, tmp_path, capsys):
+    """An unusable catalog exits 2 with the reason, and writes nothing."""
+    catalog = tmp_path / "catalog"
+    shutil.copytree(CATALOG, catalog)
+    product = catalog / "products" / "fictoprin_40mg.toml"
+    text = product.read_text(encoding="utf-8")
+    assert old in text
+    product.write_text(text.replace(old, new), encoding="utf-8")
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--catalog", str(catalog))
+    assert excinfo.value.code == 2
+    assert "argument --catalog" in capsys.readouterr().err
+    assert not out.exists()
+
+
+# --- Catalog products only (--no-builtin) -------------------------------------
+
+
+def test_no_builtin_generates_only_catalog_products(tmp_path, capsys):
+    """--no-builtin leaves out B and P: only the catalog's lines are planned."""
+    lines = summary_of(
+        tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG), "--no-builtin"
+    )
+    assert master_ids_in(tmp_path) == ["MBR-EXL005", "MBR-FTP040", "MBR-MKZ075"]
+    assert batch_ids_in(tmp_path) == [
+        "L26-0001",
+        "F26-0001",
+        "M26-0001",
+        "L26-0002",
+        "F26-0002",
+        "M26-0002",
+    ]
+    assert flagged_batches_in(tmp_path) == {"L26-0002", "F26-0002"}
+    assert [line.split()[0] for line in lines[2:5]] == ["L", "F", "M"]
+    assert lines[5].startswith("  findings:")
+
+
+def test_no_builtin_output_matches_the_rule_check(tmp_path):
+    """Catalog-only output still agrees with the test-only rule check."""
+    run(tmp_path, "--batches", "6", "--catalog", str(CATALOG), "--no-builtin")
+    with (tmp_path / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        masters = [MasterRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        batches = [BatchRow(**r) for r in csv.DictReader(f)]
+    expected = expected_rows(tmp_path)
+    by_batch = {}
+    for row in batches:
+        by_batch.setdefault(row.batch_id, []).append(row)
+    for batch_id, rows in by_batch.items():
+        master = [m for m in masters if m.master_record_id == rows[0].master_record_id]
+        found = sorted(
+            tuple(reversed(f.split(":"))) for f in rule_violations(master, rows)
+        )
+        listed = sorted(
+            (e["step_id"], e["rule_id"]) for e in expected if e["batch_id"] == batch_id
+        )
+        assert found == listed, batch_id
+
+
+def test_no_builtin_frees_letter_b(tmp_path):
+    """Without the built-ins, a catalog product may use the letter B."""
+    catalog = tmp_path / "catalog"
+    shutil.copytree(CATALOG, catalog)
+    product = catalog / "products" / "fictoprin_40mg.toml"
+    text = product.read_text(encoding="utf-8")
+    product.write_text(
+        text.replace('id_letter        = "F"', 'id_letter        = "B"'),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    assert run(out, "--batches", "3", "--catalog", str(catalog), "--no-builtin") == 0
+    assert batch_ids_in(out) == ["L26-0001", "B26-0001", "M26-0001"]
+
+
+def test_no_builtin_needs_catalog(tmp_path, capsys):
+    """--no-builtin alone would generate nothing, so it is a usage error."""
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--no-builtin")
+    assert excinfo.value.code == 2
+    assert "--no-builtin" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extra_lines_with_empty_base_frees_the_builtin_letters():
+    """With no base lines, the letter B is free for a catalog product."""
+    (line,) = extra_lines((catalog_product(prefix="B"),), base=())
+    assert line.prefix == "B"
+
+
+@pytest.mark.parametrize(
+    ("master", "version"), [("MBR-SYN500", "3"), ("MBR-PLC250", "1")]
+)
+def test_approved_masters_stay_reserved_without_builtins(master, version):
+    """An approved master's id and version can't be reused, even with no base lines.
+
+    Otherwise a dataset could carry a different 'MBR-SYN500 v3' than the
+    approved one, clashing with it under the same join key in the store.
+    """
+    item = catalog_product(prefix="B", master_record_id=master, master_version=version)
+    with pytest.raises(ValueError, match=f"{master} v{version} is an approved master"):
+        extra_lines((item,), base=())
+
+
+def test_no_builtin_catalog_reusing_an_approved_master_is_a_usage_error(
+    tmp_path, capsys
+):
+    """Through the CLI, the reserved master is a one-line usage error."""
+    catalog = catalog_copy(
+        tmp_path,
+        edits={
+            "fictoprin_40mg.toml": (
+                'master_record_id = "MBR-FTP040"',
+                'master_record_id = "MBR-PLC250"',
+            )
+        },
+    )
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--catalog", str(catalog), "--no-builtin")
+    assert excinfo.value.code == 2
+    assert "MBR-PLC250 v1 is an approved master" in capsys.readouterr().err
+    assert not out.exists()
+
+
+# --- Runs that would go past 2099 ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [(), ("--catalog", str(CATALOG), "--no-builtin")],
+    ids=["builtin", "catalog_only"],
+)
+def test_start_overflowing_2099_is_a_usage_error(extra, tmp_path, capsys):
+    """A run whose later batches would start in 2100 exits 2 with one line."""
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--start", "2099-12-31T07:00", "--batches", "10", *extra)
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --start" in err
+    assert "2100" in err
+    assert "Traceback" not in err
+    assert not out.exists()
+
+
+# --- How many batches plant the rules (batches_for_rules) ---------------------
+
+
+def planted_rules(lines, n):
+    """The rules a run of n batches over lines actually plants."""
+    plans = plan_batches(n, lines=lines)
+    return {f.rule_id for f in build_dataset(0, plans).findings}
+
+
+def test_batches_for_rules_with_the_built_in_lines():
+    """B's 2nd batch (overall batch 3) already carries all 8 rules."""
+    assert batches_for_rules(PRODUCT_LINES) == (3, frozenset(RULE_IDS))
+    assert planted_rules(PRODUCT_LINES, 3) == set(RULE_IDS)
+    assert planted_rules(PRODUCT_LINES, 2) == set()
+
+
+def test_batches_for_rules_with_the_catalog_lines():
+    """With B, P and three catalog lines, batch 6 is B26-0002: all 8 rules."""
+    lines = PRODUCT_LINES + extra_lines(load_catalog(CATALOG).products)
+    assert batches_for_rules(lines) == (6, frozenset(RULE_IDS))
+    assert planted_rules(lines, 6) == set(RULE_IDS)
+    assert planted_rules(lines, 5) == set()
+
+
+def test_batches_for_rules_without_any_plan():
+    """Lines with no defect plan can never plant a rule."""
+    assert batches_for_rules((TST_LINE,)) == (None, frozenset())
+
+
+def catalog_copy(tmp_path, keep=None, rename=None, edits=None):
+    """A copy of the catalog: keep only some products, rename files, edit text.
+
+    keep: product file names to keep (None keeps all). rename: {old: new}
+    file names. edits: {file name: (old, new)} text replacements, applied
+    after renaming.
+    """
+    catalog = tmp_path / "catalog"
+    shutil.copytree(CATALOG, catalog)
+    products = catalog / "products"
+    for path in products.glob("*.toml"):
+        if keep is not None and path.name not in keep:
+            path.unlink()
+    for old, new in (rename or {}).items():
+        (products / old).rename(products / new)
+    for name, (old, new) in (edits or {}).items():
+        path = products / name
+        text = path.read_text(encoding="utf-8")
+        assert old in text
+        path.write_text(text.replace(old, new), encoding="utf-8")
+    return catalog
+
+
+def test_summary_says_when_no_line_has_a_plan(tmp_path, capsys):
+    """Only a clean-only product: more batches would never add findings."""
+    catalog = catalog_copy(tmp_path, keep={"mockazole_75mg.toml"})
+    lines = summary_of(
+        tmp_path / "out",
+        capsys,
+        "--batches",
+        "4",
+        "--catalog",
+        str(catalog),
+        "--no-builtin",
+    )
+    assert "  findings: none (no product line has a defect plan)" in lines
+
+
+def test_summary_hint_counts_from_the_first_line_with_a_plan(tmp_path, capsys):
+    """With a clean-only line first, the first defects come one batch later."""
+    catalog = catalog_copy(
+        tmp_path, rename={"mockazole_75mg.toml": "aa_mockazole_75mg.toml"}
+    )
+    lines = summary_of(
+        tmp_path / "out",
+        capsys,
+        "--batches",
+        "3",
+        "--catalog",
+        str(catalog),
+        "--no-builtin",
+    )
+    assert (
+        "  findings: none (a line's defects start at its 2nd batch; "
+        "use --batches 5 or more)"
+    ) in lines
+
+
+def test_summary_names_the_batches_that_plant_every_rule(tmp_path, capsys):
+    """A capsule-plan line first: batch 4 lacks missing_reading, batch 5 adds it."""
+    catalog = catalog_copy(
+        tmp_path,
+        rename={"mockazole_75mg.toml": "aa_mockazole_75mg.toml"},
+        edits={
+            "aa_mockazole_75mg.toml": (
+                'id_letter        = "M"\n',
+                'id_letter        = "M"\ndefect_plan      = "capsule_standard"\n',
+            )
+        },
+    )
+    args = ("--catalog", str(catalog), "--no-builtin")
+    four = summary_of(tmp_path / "four", capsys, "--batches", "4", *args)
+    rules = next(line for line in four if line.startswith("  rules:"))
+    assert rules.endswith(
+        "(not planted: missing_reading; --batches 5 plants every rule your plans cover)"
+    )
+    five = summary_of(tmp_path / "five", capsys, "--batches", "5", *args)
+    assert any(line.endswith("(all 8 planted)") for line in five)

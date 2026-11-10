@@ -13,10 +13,12 @@ import pytest
 from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
+    TABLET_PROCESS,
     ProductConfig,
     StepTemplate,
     build_master,
     build_masters,
+    duplicate_step_ids,
     write_masters,
 )
 from pharma_batch_record_checker.schema import MASTER_HEADER
@@ -471,3 +473,10 @@ def test_product_config_is_hashable():
     """A frozen config can be used in sets and as a dict key."""
     assert hash(SYN500) == hash(dataclasses.replace(SYN500))
     assert len({SYN500, PLC250, dataclasses.replace(SYN500)}) == 2
+
+
+def test_duplicate_step_ids_lists_each_repeated_id_once_sorted():
+    """The shared check behind build_master and the catalog's template loader."""
+    steps = [dataclasses.replace(TABLET_PROCESS[0], step_id=i) for i in "BACAB"]
+    assert duplicate_step_ids(steps) == ["A", "B"]
+    assert duplicate_step_ids(TABLET_PROCESS) == []

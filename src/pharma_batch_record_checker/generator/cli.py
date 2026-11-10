@@ -4,8 +4,12 @@
 
 Writes master_record.csv, batch_record.csv and expected_findings.csv to --out.
 Each product line runs its batches back to back from --start, and every batch
-ID takes its two-digit year from its start date. The same --seed, --batches
-and --start always give byte-identical files; --seed changes readings only.
+ID takes its two-digit year from its start date. --catalog DIR adds extra
+synthetic products from a folder of TOML templates, defect plans and products
+(see catalog.py and catalog/README.md) after SYN500 and PLC250, or instead of
+them with --no-builtin; without --catalog, only SYN500 and PLC250 are
+generated. The same --seed, --batches, --start and catalog always give
+byte-identical files; --seed changes readings only.
 It needs no rules engine and no database: everything comes from the generator
 modules.
 """
@@ -21,17 +25,36 @@ from pathlib import Path
 from pharma_batch_record_checker.generator.batches import (
     STEP_INTERVAL,
     VERIFY_DELAY_MINUTES,
+    generate_clean_batch,
 )
-from pharma_batch_record_checker.generator.dataset_io import write_dataset
+from pharma_batch_record_checker.generator.catalog import (
+    Catalog,
+    CatalogProduct,
+    load_catalog,
+)
+from pharma_batch_record_checker.generator.dataset_io import (
+    BATCH_FILE,
+    EXPECTED_FILE,
+    MASTER_FILE,
+    write_dataset,
+)
 from pharma_batch_record_checker.generator.defects import (
     BATCH_PLANS,
     BatchPlan,
+    Dataset,
     build_dataset,
+    plant_defects,
+)
+from pharma_batch_record_checker.generator.expected_findings import (
+    RULE_IDS,
+    DefectLog,
 )
 from pharma_batch_record_checker.generator.masters import (
+    APPROVED_PRODUCTS,
     PLC250,
     SYN500,
     ProductConfig,
+    build_master,
 )
 from pharma_batch_record_checker.schema import TIMESTAMP_FORMAT
 
@@ -118,7 +141,11 @@ def parse_start(text: str) -> datetime:
     return check_start_year(when)
 
 
-def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ...]:
+def plan_batches(
+    n: int,
+    start: datetime = DEFAULT_START,
+    lines: Sequence[ProductLine] | None = None,
+) -> tuple[BatchPlan, ...]:
     """Plan n batches: alternate product lines; a line's even positions are defective.
 
     Each line's first batch starts at start, and each later one starts
@@ -134,10 +161,13 @@ def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ..
     doesn't change which batches are defective. B26-0002 carries the full
     tablet plan, so n >= 3 plants all eight rules. Every batch must start in
     2000-2099 (see check_start_year).
+
+    lines are the product lines to alternate, in order; None means
+    PRODUCT_LINES (read at call time).
     """
     check_batch_count(n)
     check_start_year(start)
-    lines = PRODUCT_LINES
+    lines = PRODUCT_LINES if lines is None else tuple(lines)
     next_start = [start] * len(lines)  # per line, by index
     seq_in_year: list[tuple[int, int]] = [(start.year, 0)] * len(lines)
     plans = []
@@ -162,6 +192,96 @@ def plan_batches(n: int, start: datetime = DEFAULT_START) -> tuple[BatchPlan, ..
     return tuple(plans)
 
 
+def extra_lines(
+    catalog_products: Sequence[CatalogProduct],
+    base: Sequence[ProductLine] | None = None,
+) -> tuple[ProductLine, ...]:
+    """Product lines for the products of a --catalog folder, in catalog order.
+
+    base is the built-in lines (None means PRODUCT_LINES). A catalog product's
+    ID letter must be new among the lines in use, and its master (id and
+    version) must be new and never one of the approved masters, even when
+    base leaves the built-ins out: those identities belong to the approved
+    sample and must not be redefined. Its defect plan, if
+    any, becomes the line's plan and is dry-run planted on a clean batch, so
+    a defect its limits can't take (e.g. out_of_range below a missing min) or
+    a combination that couldn't all fire is refused here rather than mid-run.
+    The catalog has already checked that the plan fits the product's
+    template. Raises ValueError naming the problem.
+    """
+    base = PRODUCT_LINES if base is None else tuple(base)
+    letters = {line.prefix for line in base}
+    masters = {_master_id(line.product) for line in base}
+    approved = {_master_id(product) for product in APPROVED_PRODUCTS}
+    lines = []
+    for item in catalog_products:
+        name = _master_id(item.product)
+        if name in approved:
+            raise ValueError(
+                f"{name} is an approved master; a catalog product can't reuse "
+                "its id and version"
+            )
+        if item.prefix in letters:
+            raise ValueError(f"{name}: ID letter {item.prefix} is already used")
+        if name in masters:
+            raise ValueError(f"{name} is already a product")
+        letters.add(item.prefix)
+        masters.add(name)
+        plan = None if item.defect_plan is None else _checked_plan(item)
+        lines.append(ProductLine(item.product, item.prefix, plan))
+    return tuple(lines)
+
+
+def _master_id(product: ProductConfig) -> str:
+    """'MBR-X v1': how a master is named in messages and compared for clashes."""
+    return f"{product.master_record_id} v{product.master_version}"
+
+
+def _checked_plan(item: CatalogProduct) -> BatchPlan:
+    """item's catalog plan as a BatchPlan, after a dry run on a clean batch."""
+    spec = item.defect_plan
+    plan = BatchPlan(
+        item.product,
+        f"{item.prefix}00-0000",  # placeholder; plan_batches sets the real ID
+        DEFAULT_START,
+        defects=spec.defects,
+        comments=spec.comments,
+    )
+    master = build_master(item.product)
+    clean = generate_clean_batch(master, plan.batch_id, plan.start, 0)
+    try:
+        plant_defects(master, clean, plan.defects, DefectLog(), plan.comments)
+    except ValueError as error:
+        raise ValueError(
+            f"{_master_id(item.product)}: its defect plan can't be planted: {error}"
+        ) from None
+    return plan
+
+
+def _catalog(text: str) -> Catalog:
+    """argparse type for --catalog: the loaded catalog folder.
+
+    Its lines are built in main, once --no-builtin is known, because the
+    clash checks depend on which built-in lines are in use.
+    """
+    try:
+        return load_catalog(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
+def product_lines(catalog: Catalog | None, no_builtin: bool) -> tuple[ProductLine, ...]:
+    """The product lines a run alternates: built-ins (unless left out), then catalog.
+
+    Raises ValueError if a catalog product clashes with a line in use or its
+    defect plan can't be planted (see extra_lines).
+    """
+    base = () if no_builtin else PRODUCT_LINES
+    if catalog is None:
+        return base
+    return base + extra_lines(catalog.products, base)
+
+
 def _batch_count(text: str) -> int:
     """argparse type for --batches: a whole number accepted by check_batch_count."""
     try:
@@ -183,7 +303,7 @@ def _start_time(text: str) -> datetime:
 
 
 def _parser() -> argparse.ArgumentParser:
-    """The command-line options: --seed, --batches, --start and --out."""
+    """The command-line options: --seed, --batches, --start, --catalog, --no-builtin, --out."""
     parser = argparse.ArgumentParser(
         prog="generate-batch-records",
         description=(
@@ -199,8 +319,10 @@ def _parser() -> argparse.ArgumentParser:
         type=_batch_count,
         default=4,
         help=(
-            "total batches, alternating products; every other batch per "
-            "product has planted defects (default 4; 3 or more covers all 8 rules)"
+            f"total batches, 1 to {MAX_BATCHES}, alternating product lines; a "
+            "line's defects start at its 2nd batch (default 4; with only the "
+            "built-ins, 3 or more plants all 8 rules). The summary says how "
+            "many batches plant every rule your plans cover"
         ),
     )
     parser.add_argument(
@@ -210,7 +332,28 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "when each product line's first batch starts, as YYYY-MM-DDTHH:MM "
             f"(default {DEFAULT_START:{TIMESTAMP_FORMAT}}); batch IDs take "
-            "their year from their start date"
+            "their year from their start date, and a run that would start a "
+            "batch after 2099 is refused"
+        ),
+    )
+    parser.add_argument(
+        "--catalog",
+        type=_catalog,
+        default=None,
+        metavar="DIR",
+        help=(
+            "folder of TOML templates, defect plans and products (see "
+            "catalog/README.md); each product becomes a line after B and P, "
+            "in file-name order. Without it, only the two built-in products"
+        ),
+    )
+    parser.add_argument(
+        "--no-builtin",
+        action="store_true",
+        help=(
+            "with --catalog: generate only the catalog's products, leaving out "
+            "MBR-SYN500 (B) and MBR-PLC250 (P); their letters are then free "
+            "for catalog products (the approved masters stay reserved)"
         ),
     )
     parser.add_argument(
@@ -222,14 +365,165 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def batches_for_rules(
+    lines: Sequence[ProductLine],
+) -> tuple[int | None, frozenset[str]]:
+    """How many batches plant every rule the lines' plans cover, and those rules.
+
+    Lines alternate and a line's defects start at its 2nd batch, so line j
+    (0-based) of k first plants its plan at overall batch k + j + 1. Walking
+    the lines in order, the answer is the first such batch at which the plans
+    seen so far cover every rule any line's plan covers. (None, empty) when
+    no line has a defect plan, because then no run ever plants a rule.
+    """
+    covered = frozenset(
+        d.rule_id
+        for line in lines
+        if line.defect_plan
+        for d in line.defect_plan.defects
+    )
+    seen: set[str] = set()
+    for j, line in enumerate(lines):
+        if line.defect_plan is None:
+            continue
+        seen.update(d.rule_id for d in line.defect_plan.defects)
+        if seen == covered:
+            return len(lines) + j + 1, covered
+    return None, covered
+
+
+def summarize(dataset: Dataset, out: Path, lines: Sequence[ProductLine]) -> str:
+    """What was written, for people: the first line, then the details.
+
+    Lists each product line (letter, master, name, batches, defective
+    batches), findings by severity and by rule (naming rules not planted and
+    how many --batches would plant them), the span of timestamps, and the
+    files. lines are the product lines the run alternated, in order. The text
+    depends only on its arguments, so the same run prints the same summary.
+    """
+    batch_ids = list(dict.fromkeys(row.batch_id for row in dataset.batches))
+    first = (
+        f"wrote {len(batch_ids)} batches, {len(dataset.findings)} expected "
+        f"findings to {out}"
+    )
+    text = [
+        first,
+        "  products:",
+        *_product_lines(dataset, lines),
+        _findings_line(dataset, lines),
+    ]
+    if dataset.findings:
+        text.append(_rules_line(dataset, lines))
+    stamps = [
+        stamp
+        for row in dataset.batches
+        for stamp in (row.performed_at, row.verified_at)
+        if stamp is not None
+    ]
+    if stamps:
+        text.append(
+            f"  time span: {min(stamps):{TIMESTAMP_FORMAT}} to "
+            f"{max(stamps):{TIMESTAMP_FORMAT}}"
+        )
+    text.append(f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}")
+    return "\n".join(text)
+
+
+def _product_lines(dataset: Dataset, lines: Sequence[ProductLine]) -> list[str]:
+    """One aligned row per master: line letter, id and version, name, counts."""
+    letters = {
+        (line.product.master_record_id, line.product.master_version): line.prefix
+        for line in lines
+    }
+    names: dict[tuple[str, str], str] = {}
+    for row in dataset.masters:
+        names.setdefault((row.master_record_id, row.master_version), row.product_name)
+    batches: dict[tuple[str, str], dict[str, None]] = {key: {} for key in names}
+    for row in dataset.batches:
+        key = (row.master_record_id, row.master_version)
+        batches.setdefault(key, {})[row.batch_id] = None
+    defective = {f.batch_id for f in dataset.findings}
+    rows = [
+        (
+            letters.get((master_id, version), "?"),
+            f"{master_id} v{version}",
+            names[(master_id, version)],
+            (
+                f"{len(ids)} batch{'' if len(ids) == 1 else 'es'}, "
+                f"{sum(b in defective for b in ids)} defective"
+            ),
+        )
+        for (master_id, version), ids in batches.items()
+    ]
+    id_width = max(len(r[1]) for r in rows)
+    name_width = max(len(r[2]) for r in rows)
+    return [
+        f"    {letter}  {master:<{id_width}}  {name:<{name_width}}  {counts}"
+        for letter, master, name, counts in rows
+    ]
+
+
+def _findings_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
+    """Findings by severity and the steps they are on, or why there are none."""
+    findings = dataset.findings
+    if not findings:
+        first = next(
+            (j for j, line in enumerate(lines) if line.defect_plan is not None), None
+        )
+        if first is None:
+            return "  findings: none (no product line has a defect plan)"
+        return (
+            "  findings: none (a line's defects start at its 2nd batch; "
+            f"use --batches {len(lines) + first + 1} or more)"
+        )
+    critical = sum(f.severity == "Critical" for f in findings)
+    steps = len({(f.batch_id, f.step_id) for f in findings})
+    return (
+        f"  findings: {critical} Critical, {len(findings) - critical} Needs Review, "
+        f"on {steps} steps"
+    )
+
+
+def _rules_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
+    """Findings per rule in rule order, and why any rule has none."""
+    counts = {rule: 0 for rule in RULE_IDS}
+    for finding in dataset.findings:
+        counts[finding.rule_id] += 1
+    listed = ", ".join(f"{rule} {n}" for rule, n in counts.items() if n)
+    missing = [rule for rule, n in counts.items() if not n]
+    if not missing:
+        return f"  rules: {listed} (all {len(RULE_IDS)} planted)"
+    needed, covered = batches_for_rules(lines)
+    notes = [f"not planted: {', '.join(missing)}"]
+    if needed is not None and any(rule in covered for rule in missing):
+        notes.append(f"--batches {needed} plants every rule your plans cover")
+    if absent := [rule for rule in missing if rule not in covered]:
+        notes.append(f"no plan in use has: {', '.join(absent)}")
+    return f"  rules: {listed} ({'; '.join(notes)})"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command and return its exit code.
 
     0 on success, 1 if the files can't be written (with a one-line error),
-    and argparse exits with 2 on bad options.
+    and argparse exits with 2 on bad options (including a catalog product
+    that clashes with a line in use or can't take its defect plan).
     """
-    args = _parser().parse_args(argv)
-    dataset = build_dataset(args.seed, plan_batches(args.batches, args.start))
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.no_builtin and args.catalog is None:
+        parser.error("--no-builtin needs --catalog, or there is nothing to generate")
+    try:
+        lines = product_lines(args.catalog, args.no_builtin)
+    except ValueError as error:
+        parser.error(f"argument --catalog: {error}")
+    try:
+        plans = plan_batches(args.batches, args.start, lines)
+    except ValueError as error:  # a later batch would start after 2099
+        parser.error(
+            f"argument --start: {error}; use an earlier --start or fewer --batches"
+        )
+    dataset = build_dataset(args.seed, plans)
     try:
         write_dataset(dataset, args.out)
     except OSError as error:
@@ -238,10 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
-        f"wrote {args.batches} batches, {len(dataset.findings)} expected findings "
-        f"to {args.out}"
-    )
+    print(summarize(dataset, args.out, lines))
     return 0
 
 

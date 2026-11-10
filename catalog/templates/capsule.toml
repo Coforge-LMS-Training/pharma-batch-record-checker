@@ -1,0 +1,93 @@
+# Copy of CAPSULE_PROCESS in generator/masters.py, used by the approved product MBR-PLC250.
+# A test fails if this file and the code constant ever differ: change both together.
+
+description = "Hard capsule, dry-blend route (10 steps)"
+
+[[step]]
+step_id        = "S-DISP-01"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh API"
+parameter      = "API net weight"
+unit           = "kg"
+critical       = true
+
+[[step]]
+step_id        = "S-DISP-02"
+unit_procedure = "Dispensing"
+operation      = "Weigh raw materials"
+phase          = "Weigh {excipient}"
+parameter      = "Excipient net weight"
+unit           = "kg"
+critical       = false
+
+[[step]]
+step_id        = "S-BLEND-01"
+unit_procedure = "Blending"
+operation      = "Pre-blend"
+phase          = "Blend"
+parameter      = "Blend time"
+unit           = "min"
+critical       = false
+
+[[step]]
+step_id        = "S-BLEND-02"
+unit_procedure = "Blending"
+operation      = "Pre-blend"
+phase          = "Check dryness"
+parameter      = "Loss on drying"
+unit           = "%"
+critical       = true
+
+[[step]]
+step_id        = "S-BLEND-03"
+unit_procedure = "Blending"
+operation      = "Lubrication"
+phase          = "Add magnesium stearate"
+parameter      = "Lubrication time"
+unit           = "min"
+critical       = false
+
+[[step]]
+step_id        = "S-ENC-01"
+unit_procedure = "Encapsulation"
+operation      = "Capsule filling"
+phase          = "Set up encapsulator"
+parameter      = "Room relative humidity"
+unit           = "%RH"
+critical       = false
+
+[[step]]
+step_id        = "S-ENC-02"
+unit_procedure = "Encapsulation"
+operation      = "Capsule filling"
+phase          = "In-process check"
+parameter      = "Capsule fill weight"
+unit           = "mg"
+critical       = true
+
+[[step]]
+step_id        = "S-ENC-03"
+unit_procedure = "Encapsulation"
+operation      = "Polishing"
+phase          = "Polish and inspect"
+parameter      = "Yield after inspection"
+unit           = "%"
+critical       = false
+
+[[step]]
+step_id        = "S-PACK-01"
+unit_procedure = "Packaging"
+operation      = "Line setup"
+phase          = "Line clearance"
+# sign-off only: no parameter or unit
+critical       = true
+
+[[step]]
+step_id        = "S-PACK-02"
+unit_procedure = "Packaging"
+operation      = "Bottle filling"
+phase          = "Check count"
+parameter      = "Capsules per bottle"
+unit           = "count"
+critical       = true

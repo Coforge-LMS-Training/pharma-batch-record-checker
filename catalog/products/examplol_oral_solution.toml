@@ -1,0 +1,25 @@
+# Invented product: an oral solution on the oral_liquid template.
+# Every value is quoted text, written exactly as it should appear in the CSV.
+
+master_record_id = "MBR-EXL005"
+master_version   = "1"
+product_name     = "Examplol 5 mg/mL oral solution"
+batch_size       = "500"
+batch_size_unit  = "L"
+excipient        = "sorbitol"
+template         = "oral_liquid"
+id_letter        = "L"
+defect_plan      = "oral_liquid_standard"
+
+# step_id = [min, max] for every measured step; "" means no limit on that side.
+# Units come from the template (e.g. S-MIX-02 is pH, S-FILL-01 is mL).
+[limits]
+"S-DISP-01" = ["2.49", "2.51"]      # API net weight, kg
+"S-DISP-02" = ["149.5", "150.5"]    # sorbitol net weight, kg
+"S-MIX-01"  = ["30", "45"]          # mixing time, min
+"S-MIX-02"  = ["4.5", "5.5"]        # pH (the plan pushes it below the min)
+"S-MIX-03"  = ["80", "120"]         # viscosity, cP
+"S-FILT-01" = ["3.2", ""]           # bubble point, bar (min only)
+"S-FILL-01" = ["100.0", "102.0"]    # fill volume, mL
+"S-FILL-02" = ["12", "18"]          # cap torque, Ncm
+"S-PACK-02" = ["99.5", "100.5"]     # label count reconciliation, %

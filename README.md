@@ -27,10 +27,19 @@ uv run pharma-review-demo --data data/
 
 `generate-batch-records` writes three files to `--out`:
 
-- `master_record.csv` holds the two synthetic masters, MBR-SYN500 v3 (tablets) and MBR-PLC250 v1 (capsules).
+- `master_record.csv` holds the synthetic masters: MBR-SYN500 v3 (tablets) and MBR-PLC250 v1 (capsules), plus any catalog products.
 - `batch_record.csv` holds the executed batches.
 - `expected_findings.csv` is the answer key: one row for every defect the generator planted. The demo does not load it.
 
-`--batches` is the total number of batches, from 1 to 162. Batches alternate between the two products (`B26-0001`, `P26-0001`, `B26-0002`, …), and every second batch of each product has planted defects, so 3 or more batches cover all 8 rules. The same `--seed` and `--batches` always give byte-identical files. `data/` is gitignored, so regenerate it instead of committing it.
+Common options:
+- `--batches N` (1–9999, default 4);
+- `--seed S`, which changes readings only;
+- `--start YYYY-MM-DDTHH:MM`;
+- `--catalog DIR`, which adds TOML-described products;
+- `--no-builtin`, which with `--catalog` generates only the catalog's products.
+
+The same options always give byte-identical files. `data/` is gitignored, so regenerate it instead of committing it.
+
+**Full usage** covers every flag, how batches and defects are planned, how many batches you need, the output files, the summary and exit codes. It's in [`src/pharma_batch_record_checker/generator/README.md`](src/pharma_batch_record_checker/generator/README.md). For catalog products, see [`catalog/README.md`](catalog/README.md).
 
 `pharma-review-demo --data data/` loads that folder instead of the approved sample, then serves the pages. It stops with a hint if the folder has no `master_record.csv` or `batch_record.csv`. A generated dataset uses the same masters as the approved sample, so if the database already holds the sample (or an earlier dataset), nothing new is loaded and the command says so. Run `docker compose down -v` first to view only the generated data. Plain `uv run pharma-review-demo` still loads the approved sample.

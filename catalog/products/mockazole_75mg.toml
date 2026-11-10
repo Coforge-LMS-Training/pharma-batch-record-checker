@@ -1,0 +1,23 @@
+# Invented product: a capsule on the capsule template, clean batches only
+# (no defect_plan).
+
+master_record_id = "MBR-MKZ075"
+master_version   = "1"
+product_name     = "Mockazole 75 mg hard capsules"
+batch_size       = "150000"
+batch_size_unit  = "capsules"
+excipient        = "mannitol"
+template         = "capsule"
+id_letter        = "M"
+
+# step_id = [min, max] for every measured step; units come from the template.
+[limits]
+"S-DISP-01"  = ["11.19", "11.31"]   # API net weight, kg
+"S-DISP-02"  = ["7.46", "7.54"]     # mannitol net weight, kg
+"S-BLEND-01" = ["12", "18"]         # blend time, min
+"S-BLEND-02" = ["", "2.5"]          # loss on drying, % (max only)
+"S-BLEND-03" = ["3", "5"]           # lubrication time, min
+"S-ENC-01"   = ["30", "50"]         # room relative humidity, %RH
+"S-ENC-02"   = ["140", "155"]       # capsule fill weight, mg
+"S-ENC-03"   = ["97.0", ""]         # yield after inspection, % (min only)
+"S-PACK-02"  = ["90", "90"]         # capsules per bottle, count (exact)
