@@ -66,7 +66,7 @@ PRODUCT_LINES: tuple[ProductLine, ...] = (
 DEFAULT_START = datetime(2026, 10, 12, 7, 0)
 # A sanity limit on --batches. Batch IDs follow their start dates, so this
 # no longer keeps anything in step; it only bounds the run size.
-MAX_BATCHES = 2000
+MAX_BATCHES = 9999
 
 # Time between one batch's last possible timestamp and the next batch's first
 # step on the same line (cleaning and line clearance).

@@ -380,7 +380,7 @@ def test_batch_id_year_matches_start_year():
 
 def test_max_batches_is_a_plain_sanity_limit():
     """The cap no longer depends on days left in 2026."""
-    assert MAX_BATCHES == 2000
+    assert MAX_BATCHES == 9999
 
 
 NEW_YEAR_START = datetime(2026, 12, 31, 7, 0)
