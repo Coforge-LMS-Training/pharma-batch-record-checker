@@ -150,7 +150,8 @@ def check_dataset(folder: Path) -> None:
     if missing:
         raise SystemExit(
             f"{folder} has no {' or '.join(missing)}. "
-            f"Run: uv run generate-batch-records --out {folder}"
+            f"Run: uv run generate-batch-records --out {folder} "
+            "(in Docker: docker compose run --rm generator)"
         )
 
 

@@ -205,6 +205,7 @@ def test_check_dataset_names_missing_files_and_the_generator_command(tmp_path):
     assert "master_record.csv" in message
     assert "batch_record.csv" in message
     assert f"uv run generate-batch-records --out {tmp_path}" in message
+    assert "docker compose run --rm generator" in message  # the Docker route
     setup.check_dataset(write_dataset_files(tmp_path))
 
 
