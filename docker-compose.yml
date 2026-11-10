@@ -35,7 +35,7 @@ services:
     entrypoint: ["generate-batch-records"]
     command:
       - "--batches"
-      - "${BATCHES:-11}"
+      - "${BATCHES:-15}"
       - "--seed"
       - "${SEED:-0}"
       - "--catalog"
