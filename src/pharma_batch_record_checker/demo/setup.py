@@ -20,6 +20,8 @@ LOCAL_ADMIN_URL = "postgresql://pharma_admin:pharma_admin@localhost:5432/pharma"
 # The two files a dataset folder must hold, master first. The app does not
 # import the generator, so the names are written here, as in the CSV contract.
 DATASET_FILES = ("master_record.csv", "batch_record.csv")
+# The approved sample's master file, relative to the root (marks a usable root).
+SAMPLE_MASTER = Path("fixtures") / "approved_sample" / "master_record.csv"
 
 
 def prepare(data: Path | None = None) -> None:
@@ -56,7 +58,19 @@ def prepare(data: Path | None = None) -> None:
 
 
 def repo_root() -> Path:
-    """Directory that contains docker-compose.yml and the approved sample."""
+    """Directory that contains the migrations and the approved sample.
+
+    PHARMA_ROOT, when set, names it directly (the container image has no
+    docker-compose.yml); it must hold alembic.ini and the approved sample.
+    Otherwise the repository is found by walking up from the working
+    directory, then from this package, to docker-compose.yml.
+    """
+    if env_root := os.environ.get("PHARMA_ROOT"):
+        root = Path(env_root)
+        needed = (root / "alembic.ini", root / SAMPLE_MASTER)
+        if missing := [str(path) for path in needed if not path.is_file()]:
+            raise SystemExit(f"PHARMA_ROOT={root} has no {' or '.join(missing)}.")
+        return root
     starts = (Path.cwd(), Path(__file__).resolve().parents[3])
     for start in starts:
         found = find_root(start)
@@ -71,8 +85,7 @@ def find_root(start: Path) -> Path | None:
     """Walk parents of start for the Compose file and the approved sample."""
     for path in (start, *start.parents):
         compose = path / "docker-compose.yml"
-        sample = path / "fixtures" / "approved_sample" / "master_record.csv"
-        if compose.is_file() and sample.is_file():
+        if compose.is_file() and (path / SAMPLE_MASTER).is_file():
             return path
     return None
 

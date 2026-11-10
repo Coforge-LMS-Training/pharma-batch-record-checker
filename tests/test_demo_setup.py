@@ -280,3 +280,50 @@ def test_data_with_no_setup_is_a_usage_error(monkeypatch, capsys):
         cli.main()
     assert excinfo.value.code == 2
     assert "--data" in capsys.readouterr().err
+
+
+# --- PHARMA_ROOT (the container's root) ---------------------------------------
+
+
+def make_root(path, *, alembic=True, sample=True):
+    """A folder with alembic.ini and/or the approved master CSV, as the app needs."""
+    path.mkdir(parents=True, exist_ok=True)
+    if alembic:
+        (path / "alembic.ini").write_text("[alembic]\n", encoding="utf-8")
+    if sample:
+        folder = path / "fixtures" / "approved_sample"
+        folder.mkdir(parents=True)
+        (folder / "master_record.csv").write_text("id\n", encoding="utf-8")
+    return path
+
+
+def test_pharma_root_is_used_when_set(monkeypatch, tmp_path):
+    """In an image there is no docker-compose.yml: PHARMA_ROOT names the root."""
+    root = make_root(tmp_path / "app")
+    monkeypatch.setenv("PHARMA_ROOT", str(root))
+    monkeypatch.chdir(tmp_path)
+    assert setup.repo_root() == root
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "missing"),
+    [({"alembic": False}, "alembic.ini"), ({"sample": False}, "master_record.csv")],
+    ids=["no_alembic_ini", "no_approved_sample"],
+)
+def test_pharma_root_missing_a_file_is_refused(monkeypatch, tmp_path, kwargs, missing):
+    """A PHARMA_ROOT without the migrations or the sample stops with one message."""
+    root = make_root(tmp_path / "app", **kwargs)
+    monkeypatch.setenv("PHARMA_ROOT", str(root))
+    with pytest.raises(SystemExit, match=missing):
+        setup.repo_root()
+
+
+def test_without_pharma_root_the_repository_is_found_as_before(monkeypatch, tmp_path):
+    """Unset PHARMA_ROOT: the walk-up search for docker-compose.yml is unchanged."""
+    root = make_root(tmp_path / "repo")
+    (root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    nested = root / "src"
+    nested.mkdir()
+    monkeypatch.delenv("PHARMA_ROOT", raising=False)
+    monkeypatch.chdir(nested)
+    assert setup.repo_root() == root
