@@ -27,6 +27,23 @@ docker compose --profile app up --build -d       # boot Postgres + app → http:
 - **The database is append-only and keeps what it first loaded.** After refilling `pharma_data`, reset it with `down -v` so the app loads the new dataset.
 - **The app is published on `127.0.0.1` only.**
 
+### Reload after changing the catalog or the dataset
+
+Use this after you add or edit files in `catalog/` (a product, template or defect plan), or when you want a different dataset in the app. Run it from the repository root:
+
+```bash
+docker compose --profile app down -v                     # 1. stop the app and wipe the database (pharma_data is kept)
+BATCHES=12 docker compose run --rm --build generator     # 2. rebuild the image and refill pharma_data
+docker compose --profile app up -d --wait                # 3. boot the app on the new data
+docker compose --profile app logs app | grep -E "Loaded|Nothing new"   # 4. expect "Loaded /data."
+```
+
+Then open http://127.0.0.1:8000.
+
+- **`--build` in step 2 is required after any catalog change.** The catalog is copied into the image when it's built, so without `--build` the generator still uses the old catalog.
+- **`down -v` in step 1 is required for the new data to show.** The database is append-only and keeps what it loaded first. Without the reset, step 4 prints "Nothing new loaded" and the pages show the old dataset.
+- **Choose `BATCHES` so every product's defective batch is included.** Each product's 2nd batch is its defective one, so use **2 × the number of product lines**. With the current catalog that's 6 lines (B, P and the 4 catalog products), so `BATCHES=12`. The default of 11 stops one short and leaves out N26-0002, Nominex's Needs Review batch. The generator's summary, printed in step 2, shows "1 defective" for each product with a defect plan when you've chosen enough.
+
 | Problem | Fix |
 |---|---|
 | `external volume "pharma_data" not found` | Run `docker volume create pharma_data` once. |
