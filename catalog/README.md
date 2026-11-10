@@ -52,10 +52,13 @@ Each item's name is its file stem, so `templates/oral_liquid.toml` is the templa
 
 | Product | Template | Defect plan | Its defective batches |
 |---|---|---|---|
-| `examplol_oral_solution` (L, MBR-EXL005) | `oral_liquid` | `oral_liquid_standard`: all 8 rules | Critical |
-| `fictoprin_40mg` (F, MBR-FTP040) | `tablet` | `tablet_standard`: all 8 rules | Critical |
+| `examplol_oral_solution` (L, MBR-EXL005) | `oral_liquid` | `oral_liquid_standard`: all 8 v1 rules | Critical |
+| `fictoprin_40mg` (F, MBR-FTP040) | `tablet` | `tablet_standard`: all 8 v1 rules | Critical |
 | `mockazole_75mg` (M, MBR-MKZ075) | `capsule` | none | always clean |
-| `nominex_10mg` (N, MBR-NMX010) | `capsule` | `capsule_needs_review`: 6 rules | **Needs Review**, never Critical |
+| `nominex_10mg` (N, MBR-NMX010) | `capsule` | `capsule_needs_review`: 6 v1 rules | **Needs Review**, never Critical |
+| `tardexa_20mg` (T, MBR-TDX020) | `tablet` | `tablet_timing`: the 2 v2 rules | **Needs Review**. The app shows **No Findings** until its engine implements rules 9 and 10. |
+
+Plans can use the 8 v1 rules and the two version-2 rules, `late_verification` and `performed_out_of_order`. The generator's README describes them. `tablet_timing.toml` is the example.
 
 ## Making a plan that only raises Needs Review
 
