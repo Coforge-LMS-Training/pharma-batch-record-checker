@@ -1,0 +1,25 @@
+# Invented product: a capsule whose defective batches are Needs Review only
+# (see defect_plans/capsule_needs_review.toml).
+
+master_record_id = "MBR-NMX010"
+master_version   = "1"
+product_name     = "Nominex 10 mg hard capsules"
+batch_size       = "300000"
+batch_size_unit  = "capsules"
+excipient        = "lactose"
+template         = "capsule"
+id_letter        = "N"
+defect_plan      = "capsule_needs_review"
+
+# step_id = [min, max] for every measured step; units come from the template.
+# capsule_needs_review needs a max on S-BLEND-01.
+[limits]
+"S-DISP-01"  = ["2.98", "3.02"]     # API net weight, kg
+"S-DISP-02"  = ["44.8", "45.2"]     # lactose net weight, kg
+"S-BLEND-01" = ["10", "15"]         # blend time, min
+"S-BLEND-02" = ["", "2.0"]          # loss on drying, % (max only)
+"S-BLEND-03" = ["2", "4"]           # lubrication time, min
+"S-ENC-01"   = ["30", "50"]         # room relative humidity, %RH
+"S-ENC-02"   = ["95", "105"]        # capsule fill weight, mg
+"S-ENC-03"   = ["98.0", ""]         # yield after inspection, % (min only)
+"S-PACK-02"  = ["30", "30"]         # capsules per bottle, count (exact)

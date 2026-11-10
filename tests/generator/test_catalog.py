@@ -344,7 +344,7 @@ def refused_catalog(tmp_path, product, **kwargs):
 
 
 def test_catalog_products_load_in_file_name_order():
-    """The committed catalog: liquid, tablet and clean-only capsule products."""
+    """The committed catalog: liquid, tablet, clean-only and Needs-Review-only capsules."""
     catalog = load_catalog(CATALOG)
     summary = [
         (
@@ -354,14 +354,39 @@ def test_catalog_products_load_in_file_name_order():
             p.defect_plan,
         )
         for p, template in zip(
-            catalog.products, ["oral_liquid", "tablet", "capsule"], strict=True
+            catalog.products,
+            ["oral_liquid", "tablet", "capsule", "capsule"],
+            strict=True,
         )
     ]
     assert summary == [
         ("MBR-EXL005", "L", True, catalog.plans["oral_liquid_standard"]),
         ("MBR-FTP040", "F", True, catalog.plans["tablet_standard"]),
         ("MBR-MKZ075", "M", True, None),
+        ("MBR-NMX010", "N", True, catalog.plans["capsule_needs_review"]),
     ]
+
+
+def test_catalog_needs_review_plan_avoids_every_critical_trigger():
+    """capsule_needs_review can only ever raise Needs Review findings.
+
+    One defect per step (2+ findings make a step Critical), no out_of_range on
+    a critical step, and none of the critical-only rules, which are always
+    Critical. That leaves 6 of the 8 rules.
+    """
+    templates = load_templates(CATALOG / "templates")
+    plan = catalog_plans()["capsule_needs_review"]
+    critical = {s.step_id for s in templates["capsule"] if s.critical}
+    steps = [d.step_id for d in plan.defects]
+    assert plan.template == "capsule"
+    assert len(steps) == len(set(steps))
+    assert not any(
+        d.rule_id == "out_of_range" and d.step_id in critical for d in plan.defects
+    )
+    assert {d.rule_id for d in plan.defects} == set(RULE_IDS) - {
+        "missing_second_check",
+        "same_person",
+    }
 
 
 def test_mini_product_loads_as_a_product_config(tmp_path):
