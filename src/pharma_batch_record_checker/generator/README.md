@@ -56,7 +56,8 @@ uv run generate-batch-records --seed 7 --batches 200 --out data/
 # Run across New Year: IDs go B26-…, then B27-0001
 uv run generate-batch-records --batches 8 --start 2026-12-31T07:00 --out data/
 
-# Add the catalog's products (an oral solution, a tablet and a capsule)
+# Add the catalog's products (an oral solution, a tablet, a clean-only capsule
+# and a capsule whose defective batches are Needs Review, not Critical)
 uv run generate-batch-records --batches 11 --catalog catalog --out data/
 
 # Only the catalog's products
