@@ -9,10 +9,11 @@ The steps are the ones in the database plan:
 4. hand_off inserts one review run per reviewed batch.
 5. Insert run.errors as review_problem rows.
 
-A second call with the same files raises DuplicateRecord. Records are not
-overwritten. A later review of a batch that is already stored is a separate
-insert_review_run, which appends a run. This module does not change
-handoff.py, and a problem row is not a hash event.
+A second call with the same files raises DuplicateRecord. That includes a
+file pair that stored only problems. Records are not overwritten. A later
+review of a batch that is already stored is a separate insert_review_run,
+which appends a run. This module does not change handoff.py, and a problem
+row is not a hash event.
 """
 
 from pharma_batch_record_checker.handoff import ReviewStore, hand_off
@@ -21,8 +22,12 @@ from pharma_batch_record_checker.parser import Source, parse_files
 from pharma_batch_record_checker.records import BatchStep, MasterVersion
 from pharma_batch_record_checker.review import ReviewRun, review
 from pharma_batch_record_checker.schema import MasterRow
+from pharma_batch_record_checker.store.errors import DuplicateRecord
 from pharma_batch_record_checker.store.imports import insert_batch, insert_master
-from pharma_batch_record_checker.store.problems import insert_problems
+from pharma_batch_record_checker.store.problems import (
+    insert_problems,
+    problems_already_stored,
+)
 
 
 def load_and_review(
@@ -49,6 +54,8 @@ def load_and_review(
             ) from exc
         insert_batch(_executed_steps(matched_batch))
     hand_off(run, store)
+    if not parsed.masters and not run.batches and problems_already_stored(run.errors):
+        raise DuplicateRecord("these problems are already stored")
     insert_problems(run.errors)
     return run
 

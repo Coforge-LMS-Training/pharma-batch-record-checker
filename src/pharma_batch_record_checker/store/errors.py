@@ -10,7 +10,7 @@ class StoreError(Exception):
 
 
 class DuplicateRecord(StoreError):
-    """That master version or batch id is already stored."""
+    """That master version, batch, or problem set is already stored."""
 
 
 class MasterNotFound(StoreError):
