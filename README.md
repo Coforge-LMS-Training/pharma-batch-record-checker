@@ -1,5 +1,36 @@
 # pharma-batch-record-checker
 
+## Run in Docker
+
+One command starts everything: Postgres, then the generator (which writes a fresh dataset into the Docker volume **`pharma_data`**), then the app (which loads it and serves the pages). You only need Docker; `uv` isn't needed on the host.
+
+```bash
+docker compose --profile app up --build -d      # then open http://127.0.0.1:8000
+```
+
+| Task | Command |
+|---|---|
+| Follow the boot | `docker compose --profile app logs -f generator app` |
+| Stop, keeping the database and `pharma_data` | `docker compose --profile app down` |
+| Stop and wipe both the database and `pharma_data` | `docker compose --profile app down -v` |
+| Boot a different dataset | `docker compose --profile app down -v` then `BATCHES=50 SEED=7 docker compose --profile app up --build -d` |
+| Write a dataset into `pharma_data` by hand (any generator flags) | `docker compose run --rm generator --batches 6 --catalog catalog --no-builtin --out /data` |
+| List the files in `pharma_data` | `docker compose run --rm --entrypoint ls generator -l /data` |
+| Show the volume | `docker volume inspect pharma_data` |
+| Use another port | `APP_PORT=8080 docker compose --profile app up -d` |
+| Rebuild after code changes | `docker compose --profile app up --build -d` |
+
+`BATCHES` (default 11) and `SEED` (default 0) are passed to the generator, which always includes the `catalog/` products. The app is published on `127.0.0.1` only.
+
+| Problem | Fix |
+|---|---|
+| `port is already allocated` | The host demo (`uv run pharma-review-demo`) or something else is on 8000. Stop it, or set `APP_PORT=8080`. |
+| The page shows an older dataset, or the log says "Nothing new loaded" | The database already holds those masters or batches, and it's append-only. Run `down -v`, then `up` again. |
+| `app` doesn't start | Generation failed (for example `BATCHES=0`). `docker compose --profile app logs generator` shows why. |
+| Plain `docker compose up` starts only Postgres | That's intended. The generator and app need `--profile app`. |
+
+Architecture, boot order, volumes, environment and security notes: [`docs/containers.md`](docs/containers.md).
+
 ## Store and review demo
 
 From a fresh clone:
