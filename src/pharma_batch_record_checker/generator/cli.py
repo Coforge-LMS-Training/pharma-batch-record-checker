@@ -319,8 +319,10 @@ def _parser() -> argparse.ArgumentParser:
         type=_batch_count,
         default=4,
         help=(
-            "total batches, alternating products; every other batch per "
-            "product has planted defects (default 4; 3 or more covers all 8 rules)"
+            f"total batches, 1 to {MAX_BATCHES}, alternating product lines; a "
+            "line's defects start at its 2nd batch (default 4; with only the "
+            "built-ins, 3 or more plants all 8 rules). The summary says how "
+            "many batches plant every rule your plans cover"
         ),
     )
     parser.add_argument(
@@ -330,7 +332,8 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "when each product line's first batch starts, as YYYY-MM-DDTHH:MM "
             f"(default {DEFAULT_START:{TIMESTAMP_FORMAT}}); batch IDs take "
-            "their year from their start date"
+            "their year from their start date, and a run that would start a "
+            "batch after 2099 is refused"
         ),
     )
     parser.add_argument(
@@ -341,8 +344,7 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "folder of TOML templates, defect plans and products (see "
             "catalog/README.md); each product becomes a line after B and P, "
-            "in file-name order. Without it, only the two built-in products. "
-            "With k lines, --batches k+1 or more covers all 8 rules"
+            "in file-name order. Without it, only the two built-in products"
         ),
     )
     parser.add_argument(
@@ -350,8 +352,8 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "with --catalog: generate only the catalog's products, leaving out "
-            "MBR-SYN500 (B) and MBR-PLC250 (P); their letters and masters are "
-            "then free for catalog products"
+            "MBR-SYN500 (B) and MBR-PLC250 (P); their letters are then free "
+            "for catalog products (the approved masters stay reserved)"
         ),
     )
     parser.add_argument(

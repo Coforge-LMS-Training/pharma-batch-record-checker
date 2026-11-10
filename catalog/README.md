@@ -14,7 +14,7 @@ To generate **only** the catalog's products, add `--no-builtin`:
 uv run generate-batch-records --batches 6 --catalog catalog --no-builtin --out data/
 ```
 
-The letters B and P and the masters MBR-SYN500 v3 and MBR-PLC250 v1 are then free for catalog products.
+The letters B and P are then free for catalog products. The approved masters MBR-SYN500 v3 and MBR-PLC250 v1 stay reserved: a catalog product can never reuse their id and version, so a dataset can't redefine an approved master.
 
 ## Layout
 
@@ -45,7 +45,8 @@ Each item's name is its file stem, so `templates/oral_liquid.toml` is the templa
   - `[limits]` gives `step_id = ["min", "max"]` for every measured step of the template and nothing else. `""` means no limit on that side.
   - A `defect_plan` must be for the product's template, and the product's limits must allow each defect. For example, an `out_of_range` defect with `side = "low"` needs a min. This is checked when the generator starts.
   - `id_letter` (one capital letter) and the master id and version must not clash with B, P or another product.
-- With k product lines in total (counting B and P unless `--no-builtin` is set), `--batches` k + 1 or more includes the second, defective batch of the first line. A line's defects start at its 2nd batch.
+- Lines take turns, and a line's defects start at its 2nd batch. With k lines (counting B and P unless `--no-builtin` is set), line j's first defective batch is overall batch k + j + 1. The generator's summary lists the rules planted and, if some are missing, how many `--batches` plant every rule your plans cover, or that no plan in use has them.
+- Text values can't be blank (except limits, where `""` means no limit). This is checked when a template or plan loads, even if no product uses it. Whether a plan's defects fit a product's limits can only be checked for products that use the plan.
 
 ## Copies of the approved products
 
