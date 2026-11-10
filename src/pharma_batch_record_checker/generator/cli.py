@@ -471,7 +471,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         lines = product_lines(args.catalog, args.no_builtin)
     except ValueError as error:
         parser.error(f"argument --catalog: {error}")
-    dataset = build_dataset(args.seed, plan_batches(args.batches, args.start, lines))
+    try:
+        plans = plan_batches(args.batches, args.start, lines)
+    except ValueError as error:  # a later batch would start after 2099
+        parser.error(
+            f"argument --start: {error}; use an earlier --start or fewer --batches"
+        )
+    dataset = build_dataset(args.seed, plans)
     try:
         write_dataset(dataset, args.out)
     except OSError as error:

@@ -810,3 +810,24 @@ def test_extra_lines_with_empty_base_allows_builtin_letters_and_masters():
     )
     (line,) = extra_lines((item,), base=())
     assert line.prefix == "B"
+
+
+# --- Runs that would go past 2099 ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [(), ("--catalog", str(CATALOG), "--no-builtin")],
+    ids=["builtin", "catalog_only"],
+)
+def test_start_overflowing_2099_is_a_usage_error(extra, tmp_path, capsys):
+    """A run whose later batches would start in 2100 exits 2 with one line."""
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--start", "2099-12-31T07:00", "--batches", "10", *extra)
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --start" in err
+    assert "2100" in err
+    assert "Traceback" not in err
+    assert not out.exists()
