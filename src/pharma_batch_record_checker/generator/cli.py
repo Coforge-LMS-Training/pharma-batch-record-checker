@@ -26,7 +26,11 @@ from pharma_batch_record_checker.generator.batches import (
     VERIFY_DELAY_MINUTES,
     generate_clean_batch,
 )
-from pharma_batch_record_checker.generator.catalog import CatalogProduct, load_catalog
+from pharma_batch_record_checker.generator.catalog import (
+    Catalog,
+    CatalogProduct,
+    load_catalog,
+)
 from pharma_batch_record_checker.generator.dataset_io import (
     BATCH_FILE,
     EXPECTED_FILE,
@@ -243,12 +247,28 @@ def _checked_plan(item: CatalogProduct) -> BatchPlan:
     return plan
 
 
-def _catalog_lines(text: str) -> tuple[ProductLine, ...]:
-    """argparse type for --catalog: the extra lines a catalog folder describes."""
+def _catalog(text: str) -> Catalog:
+    """argparse type for --catalog: the loaded catalog folder.
+
+    Its lines are built in main, once --no-builtin is known, because the
+    clash checks depend on which built-in lines are in use.
+    """
     try:
-        return extra_lines(load_catalog(text).products)
+        return load_catalog(text)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from None
+
+
+def product_lines(catalog: Catalog | None, no_builtin: bool) -> tuple[ProductLine, ...]:
+    """The product lines a run alternates: built-ins (unless left out), then catalog.
+
+    Raises ValueError if a catalog product clashes with a line in use or its
+    defect plan can't be planted (see extra_lines).
+    """
+    base = () if no_builtin else PRODUCT_LINES
+    if catalog is None:
+        return base
+    return base + extra_lines(catalog.products, base)
 
 
 def _batch_count(text: str) -> int:
@@ -272,7 +292,7 @@ def _start_time(text: str) -> datetime:
 
 
 def _parser() -> argparse.ArgumentParser:
-    """The command-line options: --seed, --batches, --start, --catalog and --out."""
+    """The command-line options: --seed, --batches, --start, --catalog, --no-builtin, --out."""
     parser = argparse.ArgumentParser(
         prog="generate-batch-records",
         description=(
@@ -304,14 +324,23 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--catalog",
-        type=_catalog_lines,
-        default=(),
+        type=_catalog,
+        default=None,
         metavar="DIR",
         help=(
             "folder of TOML templates, defect plans and products (see "
             "catalog/README.md); each product becomes a line after B and P, "
             "in file-name order. Without it, only the two built-in products. "
             "With k lines, --batches k+1 or more covers all 8 rules"
+        ),
+    )
+    parser.add_argument(
+        "--no-builtin",
+        action="store_true",
+        help=(
+            "with --catalog: generate only the catalog's products, leaving out "
+            "MBR-SYN500 (B) and MBR-PLC250 (P); their letters and masters are "
+            "then free for catalog products"
         ),
     )
     parser.add_argument(
@@ -430,12 +459,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command and return its exit code.
 
     0 on success, 1 if the files can't be written (with a one-line error),
-    and argparse exits with 2 on bad options.
+    and argparse exits with 2 on bad options (including a catalog product
+    that clashes with a line in use or can't take its defect plan).
     """
-    args = _parser().parse_args(argv)
-    dataset = build_dataset(
-        args.seed, plan_batches(args.batches, args.start, PRODUCT_LINES + args.catalog)
-    )
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.no_builtin and args.catalog is None:
+        parser.error("--no-builtin needs --catalog, or there is nothing to generate")
+    try:
+        lines = product_lines(args.catalog, args.no_builtin)
+    except ValueError as error:
+        parser.error(f"argument --catalog: {error}")
+    dataset = build_dataset(args.seed, plan_batches(args.batches, args.start, lines))
     try:
         write_dataset(dataset, args.out)
     except OSError as error:
@@ -444,7 +479,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    print(summarize(dataset, args.out, len(PRODUCT_LINES) + len(args.catalog)))
+    print(summarize(dataset, args.out, len(lines)))
     return 0
 
 

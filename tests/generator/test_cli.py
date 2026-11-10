@@ -732,3 +732,81 @@ def test_bad_catalog_is_a_usage_error(old, new, tmp_path, capsys):
     assert excinfo.value.code == 2
     assert "argument --catalog" in capsys.readouterr().err
     assert not out.exists()
+
+
+# --- Catalog products only (--no-builtin) -------------------------------------
+
+
+def test_no_builtin_generates_only_catalog_products(tmp_path, capsys):
+    """--no-builtin leaves out B and P: only the catalog's lines are planned."""
+    lines = summary_of(
+        tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG), "--no-builtin"
+    )
+    assert master_ids_in(tmp_path) == ["MBR-EXL005", "MBR-FTP040", "MBR-MKZ075"]
+    assert batch_ids_in(tmp_path) == [
+        "L26-0001",
+        "F26-0001",
+        "M26-0001",
+        "L26-0002",
+        "F26-0002",
+        "M26-0002",
+    ]
+    assert flagged_batches_in(tmp_path) == {"L26-0002", "F26-0002"}
+    assert [line.split()[0] for line in lines[2:5]] == ["L", "F", "M"]
+    assert lines[5].startswith("  findings:")
+
+
+def test_no_builtin_output_matches_the_rule_check(tmp_path):
+    """Catalog-only output still agrees with the test-only rule check."""
+    run(tmp_path, "--batches", "6", "--catalog", str(CATALOG), "--no-builtin")
+    with (tmp_path / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        masters = [MasterRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        batches = [BatchRow(**r) for r in csv.DictReader(f)]
+    expected = expected_rows(tmp_path)
+    by_batch = {}
+    for row in batches:
+        by_batch.setdefault(row.batch_id, []).append(row)
+    for batch_id, rows in by_batch.items():
+        master = [m for m in masters if m.master_record_id == rows[0].master_record_id]
+        found = sorted(
+            tuple(reversed(f.split(":"))) for f in rule_violations(master, rows)
+        )
+        listed = sorted(
+            (e["step_id"], e["rule_id"]) for e in expected if e["batch_id"] == batch_id
+        )
+        assert found == listed, batch_id
+
+
+def test_no_builtin_frees_letter_b(tmp_path):
+    """Without the built-ins, a catalog product may use the letter B."""
+    catalog = tmp_path / "catalog"
+    shutil.copytree(CATALOG, catalog)
+    product = catalog / "products" / "fictoprin_40mg.toml"
+    text = product.read_text(encoding="utf-8")
+    product.write_text(
+        text.replace('id_letter        = "F"', 'id_letter        = "B"'),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    assert run(out, "--batches", "3", "--catalog", str(catalog), "--no-builtin") == 0
+    assert batch_ids_in(out) == ["L26-0001", "B26-0001", "M26-0001"]
+
+
+def test_no_builtin_needs_catalog(tmp_path, capsys):
+    """--no-builtin alone would generate nothing, so it is a usage error."""
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--no-builtin")
+    assert excinfo.value.code == 2
+    assert "--no-builtin" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extra_lines_with_empty_base_allows_builtin_letters_and_masters():
+    """With no base lines, B and MBR-SYN500 v3 are free to use."""
+    item = catalog_product(
+        prefix="B", master_record_id="MBR-SYN500", master_version="3"
+    )
+    (line,) = extra_lines((item,), base=())
+    assert line.prefix == "B"
