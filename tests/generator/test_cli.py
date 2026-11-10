@@ -31,7 +31,11 @@ from pharma_batch_record_checker.generator.dataset_io import (
     EXPECTED_FILE,
     MASTER_FILE,
 )
-from pharma_batch_record_checker.generator.defects import build_dataset
+from pharma_batch_record_checker.generator.defects import (
+    BatchPlan,
+    Defect,
+    build_dataset,
+)
 from pharma_batch_record_checker.generator.expected_findings import (
     EXPECTED_FINDINGS_HEADER,
     RULE_IDS,
@@ -281,7 +285,10 @@ def test_summary_counts_findings_by_severity_steps_and_rule(tmp_path, capsys):
     per_rule = ", ".join(
         f"{rule} {sum(r['rule_id'] == rule for r in rows)}" for rule in RULE_IDS
     )
-    assert f"  rules: {per_rule} (all 8 planted)" in lines
+    assert (
+        f"  rules: {per_rule} (not planted: late_verification, performed_out_of_order; no plan in use has: late_verification, performed_out_of_order)"
+        in lines
+    )
 
 
 def test_summary_names_rules_that_were_not_planted():
@@ -976,10 +983,17 @@ def test_summary_names_the_batches_that_plant_every_rule(tmp_path, capsys):
     five = summary_of(tmp_path / "five", capsys, "--batches", "5", *args)
     rules = next(line for line in five if line.startswith("  rules:"))
     assert rules.endswith(
-        "(not planted: missing_reading; --batches 6 plants every rule your plans cover)"
+        "(not planted: missing_reading, late_verification, performed_out_of_order; "
+        "--batches 6 plants every rule your plans cover; "
+        "no plan in use has: late_verification, performed_out_of_order)"
     )
     six = summary_of(tmp_path / "six", capsys, "--batches", "6", *args)
-    assert any(line.endswith("(all 8 planted)") for line in six)
+    assert any(
+        line.endswith(
+            "(not planted: late_verification, performed_out_of_order; no plan in use has: late_verification, performed_out_of_order)"
+        )
+        for line in six
+    )
 
 
 # --- A plan that only raises Needs Review findings ----------------------------
@@ -1010,3 +1024,16 @@ def test_needs_review_plan_never_makes_a_batch_critical(tmp_path):
         tuple(reversed(f.split(":"))) for f in rule_violations(master, batch)
     )
     assert found == sorted((r["step_id"], r["rule_id"]) for r in rows)
+
+
+def test_summary_counts_v2_findings():
+    """A v2 finding is counted by rule like any other (no v1-only rule list)."""
+    plan = BatchPlan(
+        SYN500,
+        "B26-0002",
+        datetime(2026, 10, 12, 7, 0),
+        defects=(Defect("S-COMP-01", "late_verification"),),
+    )
+    text = summarize(build_dataset(0, [plan]), Path("out"), PRODUCT_LINES[:1])
+    rules = next(line for line in text.splitlines() if line.startswith("  rules:"))
+    assert rules.startswith("  rules: late_verification 1 (not planted: ")
