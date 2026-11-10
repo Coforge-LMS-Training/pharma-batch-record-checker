@@ -48,6 +48,25 @@ Each item's name is its file stem, so `templates/oral_liquid.toml` is the templa
 - Lines take turns, and a line's defects start at its 2nd batch. With k lines (counting B and P unless `--no-builtin` is set), line j's first defective batch is overall batch k + j + 1. The generator's summary lists the rules planted and, if some are missing, how many `--batches` plant every rule your plans cover, or that no plan in use has them.
 - Text values can't be blank (except limits, where `""` means no limit). This is checked when a template or plan loads, even if no product uses it. Whether a plan's defects fit a product's limits can only be checked for products that use the plan.
 
+## What's in this catalog
+
+| Product | Template | Defect plan | Its defective batches |
+|---|---|---|---|
+| `examplol_oral_solution` (L, MBR-EXL005) | `oral_liquid` | `oral_liquid_standard`: all 8 rules | Critical |
+| `fictoprin_40mg` (F, MBR-FTP040) | `tablet` | `tablet_standard`: all 8 rules | Critical |
+| `mockazole_75mg` (M, MBR-MKZ075) | `capsule` | none | always clean |
+| `nominex_10mg` (N, MBR-NMX010) | `capsule` | `capsule_needs_review`: 6 rules | **Needs Review**, never Critical |
+
+## Making a plan that only raises Needs Review
+
+A step is Critical if it has 2 or more findings, or if it's a critical step that is out of range, has no second check, or was checked by the same person. So a plan stays Needs Review only if it:
+
+- puts **one defect per step**;
+- uses `out_of_range` only on **non-critical** steps;
+- leaves out `missing_second_check` and `same_person`. Those only apply to critical steps, where they're always Critical.
+
+`missing_step`, `missing_performer`, `missing_reading`, `unit_mismatch` and `verifier_before_performer` stay Needs Review even on a critical step. `capsule_needs_review.toml` is a worked example.
+
 ## Copies of the approved products
 
 `templates/tablet.toml`, `templates/capsule.toml`, `defect_plans/tablet_standard.toml` and `defect_plans/capsule_standard.toml` are copies of the code constants for MBR-SYN500 and MBR-PLC250. Tests fail if a copy and its constant ever differ, so change both together.
