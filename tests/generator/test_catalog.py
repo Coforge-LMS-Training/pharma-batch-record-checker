@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from pharma_batch_record_checker.generator.catalog import (
+    CatalogProduct,
     DefectPlanSpec,
+    load_catalog,
     load_defect_plans,
     load_templates,
 )
@@ -16,6 +18,7 @@ from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
     TABLET_PROCESS,
+    ProductConfig,
     StepTemplate,
 )
 
@@ -274,3 +277,144 @@ def test_plan_needs_defects(tmp_path):
 def test_missing_defect_plans_folder_means_no_plans(tmp_path):
     """defect_plans/ is optional: no folder means no plans."""
     assert load_defect_plans(tmp_path / "defect_plans", mini_templates(tmp_path)) == {}
+
+
+# --- Products and the whole catalog -------------------------------------------
+
+MINI_PRODUCT = """\
+master_record_id = "MBR-MIN001"
+master_version   = "1"
+product_name     = "Minimol test solution"
+batch_size       = "100"
+batch_size_unit  = "L"
+excipient        = "purified water"
+template         = "mini"
+id_letter        = "N"
+defect_plan      = "mini_plan"
+
+[limits]
+"S-MIX-01" = ["10", "20"]
+"""
+
+
+def mini_catalog(tmp_path, product=MINI_PRODUCT, extra_templates=None):
+    """A catalog folder with the mini template and plan and one product file."""
+    root = tmp_path / "catalog"
+    write_files(
+        root / "templates", {"mini.toml": MINI_TEMPLATE, **(extra_templates or {})}
+    )
+    write_files(root / "defect_plans", {"mini_plan.toml": MINI_PLAN})
+    write_files(root / "products", {"minimol.toml": product})
+    return root
+
+
+def refused_catalog(tmp_path, product, **kwargs):
+    """The ValueError message load_catalog raises because of the product file."""
+    root = mini_catalog(tmp_path, product, **kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        load_catalog(root)
+    message = str(excinfo.value)
+    assert message.startswith(f"{root / 'products' / 'minimol.toml'}: ")
+    return message
+
+
+def test_catalog_products_load_in_file_name_order():
+    """The committed catalog: liquid, tablet and clean-only capsule products."""
+    catalog = load_catalog(CATALOG)
+    summary = [
+        (
+            p.product.master_record_id,
+            p.prefix,
+            p.product.process == catalog.templates[template],
+            p.defect_plan,
+        )
+        for p, template in zip(
+            catalog.products, ["oral_liquid", "tablet", "capsule"], strict=True
+        )
+    ]
+    assert summary == [
+        ("MBR-EXL005", "L", True, catalog.plans["oral_liquid_standard"]),
+        ("MBR-FTP040", "F", True, catalog.plans["tablet_standard"]),
+        ("MBR-MKZ075", "M", True, None),
+    ]
+
+
+def test_mini_product_loads_as_a_product_config(tmp_path):
+    """A product file becomes a ProductConfig on its template, with its plan."""
+    catalog = load_catalog(mini_catalog(tmp_path))
+    (item,) = catalog.products
+    assert item == CatalogProduct(
+        product=ProductConfig(
+            master_record_id="MBR-MIN001",
+            master_version="1",
+            product_name="Minimol test solution",
+            batch_size="100",
+            batch_size_unit="L",
+            excipient="purified water",
+            process=catalog.templates["mini"],
+            limits={"S-MIX-01": ("10", "20")},
+        ),
+        prefix="N",
+        defect_plan=catalog.plans["mini_plan"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "reason"),
+    [
+        ('template         = "mini"', 'template = "nope"', "nope"),
+        ('defect_plan      = "mini_plan"', 'defect_plan = "nope"', "nope"),
+        ('batch_size       = "100"', "batch_size = 100", "batch_size"),
+        ('"S-MIX-01" = ["10", "20"]', '"S-MIX-01" = [10, 20]', "S-MIX-01"),
+        ('"S-MIX-01" = ["10", "20"]', "", "no limits for measured steps"),
+        (
+            '"S-MIX-01" = ["10", "20"]',
+            '"S-MIX-01" = ["10", "20"]\n"S-PACK-01" = ["1", "2"]',
+            "sign-off-only",
+        ),
+        ('id_letter        = "N"', 'id_letter = "nn"', "id_letter"),
+        (
+            'excipient        = "purified water"',
+            'excipient = "x"\nexipient = "y"',
+            "exipient",
+        ),
+    ],
+    ids=[
+        "unknown_template",
+        "unknown_plan",
+        "numeric_batch_size",
+        "numeric_limit",
+        "missing_limit",
+        "limit_on_sign_off",
+        "bad_letter",
+        "unknown_key",
+    ],
+)
+def test_invalid_product_is_refused(tmp_path, old, new, reason):
+    """Product mistakes are refused with the product file and the reason."""
+    assert old in MINI_PRODUCT
+    assert reason in refused_catalog(tmp_path, MINI_PRODUCT.replace(old, new, 1))
+
+
+def test_product_plan_must_use_the_product_template(tmp_path):
+    """A plan written for one template can't be used by a product on another."""
+    product = MINI_PRODUCT.replace('template         = "mini"', 'template = "other"')
+    message = refused_catalog(
+        tmp_path, product, extra_templates={"other.toml": MINI_TEMPLATE}
+    )
+    assert "mini_plan" in message
+    assert "other" in message
+
+
+def test_catalog_needs_products(tmp_path):
+    """A catalog with an empty products folder adds nothing, so it is an error."""
+    root = mini_catalog(tmp_path)
+    (root / "products" / "minimol.toml").unlink()
+    with pytest.raises(ValueError, match="no products"):
+        load_catalog(root)
+
+
+def test_catalog_needs_templates_folder(tmp_path):
+    """Without templates/ nothing can be built."""
+    with pytest.raises(ValueError, match="templates: no such folder"):
+        load_catalog(tmp_path)

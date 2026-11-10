@@ -33,9 +33,16 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 
 from pharma_batch_record_checker.generator.defects import Defect
 from pharma_batch_record_checker.generator.expected_findings import RuleId
-from pharma_batch_record_checker.generator.masters import StepTemplate
+from pharma_batch_record_checker.generator.masters import (
+    ProductConfig,
+    StepTemplate,
+    build_master,
+)
 
 Text = Annotated[str, StringConstraints(strict=True)]
+Letter = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z]$")]
+# [min, max] as written; a TOML array is a list, so it is converted to a tuple.
+Limit = Annotated[list[Text], Field(min_length=2, max_length=2)]
 
 # What a file stem must look like to be used as a name.
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -171,6 +178,101 @@ def load_defect_plans(
             )
         plans[name] = DefectPlanSpec(parsed.template, tuple(defects), parsed.comments)
     return MappingProxyType(plans)
+
+
+# --- Products and the whole catalog ------------------------------------------
+
+
+@dataclass(frozen=True)
+class CatalogProduct:
+    """One product from the catalog: its config, ID letter and defect plan.
+
+    defect_plan is None for a product that only gets clean batches.
+    """
+
+    product: ProductConfig
+    prefix: str
+    defect_plan: DefectPlanSpec | None
+
+
+@dataclass(frozen=True)
+class Catalog:
+    """Everything a catalog folder holds, each part in file-name order."""
+
+    templates: Mapping[str, tuple[StepTemplate, ...]]
+    plans: Mapping[str, DefectPlanSpec]
+    products: tuple[CatalogProduct, ...]
+
+
+class _ProductFile(_Strict):
+    """A product file, as written: identity, template, ID letter, limits, plan."""
+
+    master_record_id: Text
+    master_version: Text
+    product_name: Text
+    batch_size: Text
+    batch_size_unit: Text
+    excipient: Text
+    template: Text
+    id_letter: Letter
+    defect_plan: Text | None = None
+    limits: dict[Text, Limit]
+
+
+def load_catalog(folder: str | os.PathLike[str]) -> Catalog:
+    """Load a catalog folder: templates/, optional defect_plans/, products/.
+
+    Each product must name a loaded template and, if it has one, a plan for
+    that same template; its master is built here, so limit coverage and the
+    CSV contract are checked at load. The catalog needs at least one product.
+    Raises ValueError naming the file (or folder) at fault.
+    """
+    root = Path(folder)
+    templates = load_templates(root / "templates")
+    plans = load_defect_plans(root / "defect_plans", templates)
+    products = tuple(
+        _product(path, templates, plans) for _, path in _named_files(root / "products")
+    )
+    if not products:
+        raise ValueError(f"{root / 'products'}: no products")
+    return Catalog(templates, plans, products)
+
+
+def _product(
+    path: Path,
+    templates: Mapping[str, tuple[StepTemplate, ...]],
+    plans: Mapping[str, DefectPlanSpec],
+) -> CatalogProduct:
+    """The CatalogProduct one product file describes, fully checked."""
+    entry = _parse(path, _ProductFile)
+    process = templates.get(entry.template)
+    if process is None:
+        raise ValueError(f"{path}: unknown template {entry.template!r}")
+    plan = None
+    if entry.defect_plan is not None:
+        plan = plans.get(entry.defect_plan)
+        if plan is None:
+            raise ValueError(f"{path}: unknown defect_plan {entry.defect_plan!r}")
+        if plan.template != entry.template:
+            raise ValueError(
+                f"{path}: defect_plan {entry.defect_plan!r} is for template "
+                f"{plan.template!r}, not {entry.template!r}"
+            )
+    config = ProductConfig(
+        master_record_id=entry.master_record_id,
+        master_version=entry.master_version,
+        product_name=entry.product_name,
+        batch_size=entry.batch_size,
+        batch_size_unit=entry.batch_size_unit,
+        excipient=entry.excipient,
+        process=process,
+        limits={step: (low, high) for step, (low, high) in entry.limits.items()},
+    )
+    try:
+        build_master(config)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from None
+    return CatalogProduct(config, entry.id_letter, plan)
 
 
 # --- Reading files --------------------------------------------------------------
