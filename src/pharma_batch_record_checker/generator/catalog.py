@@ -24,12 +24,15 @@ import os
 import re
 import tomllib
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
+from pharma_batch_record_checker.generator.defects import Defect
+from pharma_batch_record_checker.generator.expected_findings import RuleId
 from pharma_batch_record_checker.generator.masters import StepTemplate
 
 Text = Annotated[str, StringConstraints(strict=True)]
@@ -92,6 +95,82 @@ def _step(path: Path, entry: _StepEntry) -> StepTemplate:
         return StepTemplate(**entry.model_dump())
     except ValueError as error:
         raise ValueError(f"{path}: {error}") from None
+
+
+# --- Defect plans ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DefectPlanSpec:
+    """A defect plan from the catalog: the defects to plant on one template.
+
+    comments maps a defective step_id to an inert, instruction-like comment.
+    """
+
+    template: str
+    defects: tuple[Defect, ...]
+    comments: Mapping[str, str] = field(default_factory=dict, hash=False)
+
+    def __post_init__(self) -> None:
+        """Keep a read-only copy of comments, so a plan can't change in place."""
+        object.__setattr__(self, "comments", MappingProxyType(dict(self.comments)))
+
+
+class _DefectEntry(_Strict):
+    """One [[defect]]: break rule_id on step_id (side/unit as in Defect)."""
+
+    step_id: Text
+    rule_id: RuleId
+    side: Literal["low", "high"] | None = None
+    unit: Text | None = None
+
+
+class _PlanFile(_Strict):
+    """A defect plan file: its template, at least one defect, and comments."""
+
+    template: Text
+    defect: list[_DefectEntry] = Field(min_length=1)
+    comments: dict[Text, Text] = Field(default_factory=dict)
+
+
+def load_defect_plans(
+    folder: str | os.PathLike[str],
+    templates: Mapping[str, tuple[StepTemplate, ...]],
+) -> Mapping[str, DefectPlanSpec]:
+    """Load every defect_plans/<name>.toml as {name: plan}, in name order.
+
+    The folder is optional: if it doesn't exist there are no plans. Each plan
+    must name a loaded template, put every defect on a step of it, and put
+    comments only on steps it breaks. Whether the defects can actually be
+    planted depends on a product's limits, so that is checked per product.
+    """
+    if not Path(folder).exists():
+        return MappingProxyType({})
+    plans = {}
+    for name, path in _named_files(folder):
+        parsed = _parse(path, _PlanFile)
+        steps = templates.get(parsed.template)
+        if steps is None:
+            raise ValueError(f"{path}: unknown template {parsed.template!r}")
+        step_ids = {s.step_id for s in steps}
+        defects = []
+        for entry in parsed.defect:
+            if entry.step_id not in step_ids:
+                raise ValueError(
+                    f"{path}: {entry.step_id} is not a step of template "
+                    f"{parsed.template!r}"
+                )
+            try:
+                defects.append(Defect(**entry.model_dump()))
+            except ValueError as error:
+                raise ValueError(f"{path}: {error}") from None
+        defective = {d.step_id for d in defects}
+        if stray := sorted(set(parsed.comments) - defective):
+            raise ValueError(
+                f"{path}: comments go only on steps with a defect, not {stray}"
+            )
+        plans[name] = DefectPlanSpec(parsed.template, tuple(defects), parsed.comments)
+    return MappingProxyType(plans)
 
 
 # --- Reading files --------------------------------------------------------------

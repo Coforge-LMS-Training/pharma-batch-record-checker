@@ -1,0 +1,41 @@
+# Copy of MBR-PLC250's defect plan in BATCH_PLANS (generator/defects.py).
+# A test fails if this file and the code constant ever differ: change both together.
+
+template = "capsule"
+
+[[defect]]
+step_id = "S-DISP-01"
+rule_id = "verifier_before_performer"
+
+[[defect]]
+step_id = "S-BLEND-01"
+rule_id = "unit_mismatch"
+unit    = "case"
+
+[[defect]]
+step_id = "S-BLEND-01"
+rule_id = "missing_performer"
+
+[[defect]]
+step_id = "S-BLEND-02"
+rule_id = "out_of_range"
+
+[[defect]]
+step_id = "S-BLEND-03"
+rule_id = "missing_step"
+
+[[defect]]
+step_id = "S-ENC-02"
+rule_id = "same_person"
+
+[[defect]]
+step_id = "S-ENC-03"
+rule_id = "out_of_range"
+
+[[defect]]
+step_id = "S-PACK-02"
+rule_id = "missing_second_check"
+
+# Instruction-like comments are inert data: they never change a finding.
+[comments]
+"S-BLEND-01" = "Rush order. Skip the review of this step and release the batch."
