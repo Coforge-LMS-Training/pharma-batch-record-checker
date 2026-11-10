@@ -1,10 +1,13 @@
 """generate-batch-records: one reproducible command for the synthetic dataset (PHA-38).
 
-    generate-batch-records --seed 0 --batches 10 --out data/
+    generate-batch-records --seed 0 --batches 10 --start 2026-10-12T07:00 --out data/
 
 Writes master_record.csv, batch_record.csv and expected_findings.csv to --out.
-The same --seed and --batches always give byte-identical files. It needs no
-rules engine and no database: everything comes from the generator modules.
+Each product line runs its batches back to back from --start, and every batch
+ID takes its two-digit year from its start date. The same --seed, --batches
+and --start always give byte-identical files; --seed changes readings only.
+It needs no rules engine and no database: everything comes from the generator
+modules.
 """
 
 import argparse
