@@ -94,10 +94,20 @@ def test_postgres_has_no_profile_so_the_host_workflow_starts_only_it():
     assert "profiles:" not in compose_block("postgres")
 
 
-def test_app_and_generator_are_behind_the_app_profile():
-    """The containers start with `--profile app`, never with plain `up`."""
-    for name in ("app", "generator"):
-        assert re.search(r"profiles:\s*\[\s*\"?app\"?\s*\]", compose_block(name)), name
+def profiles_of(name):
+    """The profiles a compose service declares, e.g. ['app'] (empty if none)."""
+    found = re.search(r"profiles:\s*\[([^\]]*)\]", compose_block(name))
+    return [p.strip().strip('"') for p in found.group(1).split(",")] if found else []
+
+
+def test_app_and_generator_have_separate_profiles():
+    """`--profile app up` boots the app only; the generator runs on its own.
+
+    The generator is in the tools profile, so booting the app never rewrites
+    pharma_data; `docker compose run generator` enables its profile itself.
+    """
+    assert profiles_of("app") == ["app"]
+    assert profiles_of("generator") == ["tools"]
 
 
 def test_app_port_is_published_on_localhost_only():
@@ -107,9 +117,15 @@ def test_app_port_is_published_on_localhost_only():
     assert all(port.startswith("127.0.0.1:") for port in ports)
 
 
-def test_data_volume_is_named_pharma_data():
-    """The volume's Docker name is exactly pharma_data (no project prefix)."""
-    assert re.search(r"name:\s*pharma_data\b", compose_block("pharma_data", "volumes"))
+def test_data_volume_is_external_and_named_pharma_data():
+    """pharma_data is created once and never removed by `down -v`.
+
+    Compose doesn't own an external volume, so resetting the database keeps
+    the generated data. Its Docker name is exactly pharma_data.
+    """
+    block = compose_block("pharma_data", "volumes")
+    assert re.search(r"name:\s*pharma_data\b", block)
+    assert re.search(r"external:\s*true\b", block)
 
 
 def test_generator_writes_and_app_reads_pharma_data():
@@ -122,9 +138,9 @@ def test_generator_writes_and_app_reads_pharma_data():
     )
 
 
-def test_app_waits_for_the_generator_to_finish():
-    """The app loads /data only after the generator has written it successfully."""
-    assert re.search(
-        r"generator:\s*\n\s*condition:\s*service_completed_successfully",
-        compose_block("app"),
-    )
+def test_app_does_not_depend_on_the_generator():
+    """Booting the app never runs the generator: it serves what pharma_data holds."""
+    depends = re.search(r"depends_on:\n((?:\s{6,}.*\n?)*)", compose_block("app"))
+    assert depends
+    assert "generator" not in depends.group(1)
+    assert "postgres" in depends.group(1)
