@@ -21,17 +21,25 @@ from pathlib import Path
 from pharma_batch_record_checker.generator.batches import (
     STEP_INTERVAL,
     VERIFY_DELAY_MINUTES,
+    generate_clean_batch,
 )
 from pharma_batch_record_checker.generator.dataset_io import write_dataset
 from pharma_batch_record_checker.generator.defects import (
     BATCH_PLANS,
     BatchPlan,
     build_dataset,
+    plant_defects,
 )
+from pharma_batch_record_checker.generator.expected_findings import DefectLog
 from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
     ProductConfig,
+    build_master,
+)
+from pharma_batch_record_checker.generator.product_file import (
+    FileProduct,
+    load_products,
 )
 from pharma_batch_record_checker.schema import TIMESTAMP_FORMAT
 
@@ -169,6 +177,77 @@ def plan_batches(
     return tuple(plans)
 
 
+def extra_lines(
+    file_products: Sequence[FileProduct],
+    base: Sequence[ProductLine] | None = None,
+) -> tuple[ProductLine, ...]:
+    """Product lines for products read from a --products file, in file order.
+
+    base is the built-in lines (None means PRODUCT_LINES). A file product's
+    ID letter and master (id and version) must be new. defects_like must name
+    a base product that has a defect plan and the same process template; the
+    plan is copied onto the new product and dry-run planted, so a defect its
+    limits can't take (e.g. out_of_range below a missing min) is refused here
+    rather than mid-run. Raises ValueError naming the problem.
+    """
+    base = PRODUCT_LINES if base is None else tuple(base)
+    letters = {line.prefix for line in base}
+    masters = {_master_id(line.product) for line in base}
+    plans = {line.product.master_record_id: line for line in base}
+    lines = []
+    for item in file_products:
+        product, name = item.product, _master_id(item.product)
+        if item.prefix in letters:
+            raise ValueError(f"{name}: ID letter {item.prefix} is already used")
+        if name in masters:
+            raise ValueError(f"{name} is already a product")
+        letters.add(item.prefix)
+        masters.add(name)
+        plan = None
+        if item.defects_like is not None:
+            plan = _reused_plan(item, plans.get(item.defects_like))
+        lines.append(ProductLine(product, item.prefix, plan))
+    return tuple(lines)
+
+
+def _master_id(product: ProductConfig) -> str:
+    """'MBR-X v1': how a master is named in messages and compared for clashes."""
+    return f"{product.master_record_id} v{product.master_version}"
+
+
+def _reused_plan(item: FileProduct, source: ProductLine | None) -> BatchPlan:
+    """The source line's defect plan, moved onto item's product and dry-run planted."""
+    name = _master_id(item.product)
+    if source is None or source.defect_plan is None:
+        raise ValueError(
+            f"{name}: defects_like {item.defects_like} is not a built-in product "
+            "with a defect plan"
+        )
+    if source.product.process != item.product.process:
+        raise ValueError(
+            f"{name}: defects_like {item.defects_like} uses a different process "
+            "template, so its defects don't fit"
+        )
+    plan = dataclasses.replace(source.defect_plan, product=item.product)
+    master = build_master(item.product)
+    clean = generate_clean_batch(master, f"{item.prefix}00-0000", DEFAULT_START, 0)
+    try:
+        plant_defects(master, clean, plan.defects, DefectLog(), plan.comments)
+    except ValueError as error:
+        raise ValueError(
+            f"{name}: defects from {item.defects_like} can't be planted: {error}"
+        ) from None
+    return plan
+
+
+def _products_file(text: str) -> tuple[ProductLine, ...]:
+    """argparse type for --products: the extra lines a products file describes."""
+    try:
+        return extra_lines(load_products(text))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def _batch_count(text: str) -> int:
     """argparse type for --batches: a whole number accepted by check_batch_count."""
     try:
@@ -190,7 +269,7 @@ def _start_time(text: str) -> datetime:
 
 
 def _parser() -> argparse.ArgumentParser:
-    """The command-line options: --seed, --batches, --start and --out."""
+    """The command-line options: --seed, --batches, --start, --products and --out."""
     parser = argparse.ArgumentParser(
         prog="generate-batch-records",
         description=(
@@ -221,6 +300,17 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--products",
+        type=_products_file,
+        default=(),
+        metavar="FILE",
+        help=(
+            "TOML file of extra synthetic products (see examples/products.toml); "
+            "their lines follow B and P in file order. Without it, only the two "
+            "built-in products. With k lines, --batches k+1 or more covers all 8 rules"
+        ),
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         required=True,
@@ -236,7 +326,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     and argparse exits with 2 on bad options.
     """
     args = _parser().parse_args(argv)
-    dataset = build_dataset(args.seed, plan_batches(args.batches, args.start))
+    dataset = build_dataset(
+        args.seed, plan_batches(args.batches, args.start, PRODUCT_LINES + args.products)
+    )
     try:
         write_dataset(dataset, args.out)
     except OSError as error:

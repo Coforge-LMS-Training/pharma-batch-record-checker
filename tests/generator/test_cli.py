@@ -6,6 +6,7 @@ import subprocess
 import sys
 from datetime import datetime
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from pharma_batch_record_checker.generator.cli import (
     PRODUCT_LINES,
     ProductLine,
     batch_span,
+    extra_lines,
     main,
     parse_start,
     plan_batches,
@@ -30,8 +32,14 @@ from pharma_batch_record_checker.generator.expected_findings import (
     EXPECTED_FINDINGS_HEADER,
     RULE_IDS,
 )
-from pharma_batch_record_checker.generator.masters import SYN500
-from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
+from pharma_batch_record_checker.generator.masters import PLC250, SYN500
+from pharma_batch_record_checker.generator.product_file import FileProduct
+from pharma_batch_record_checker.schema import (
+    BATCH_HEADER,
+    MASTER_HEADER,
+    BatchRow,
+    MasterRow,
+)
 from tests.generator.rule_oracle import rule_violations
 
 # --- Planning N batches -------------------------------------------------------
@@ -465,3 +473,156 @@ def test_plan_batches_uses_given_lines():
 def test_plan_batches_defaults_to_product_lines():
     """Without lines, plan_batches uses PRODUCT_LINES."""
     assert plan_batches(8) == plan_batches(8, lines=PRODUCT_LINES)
+
+
+# --- Extra products from a TOML file (--products) -----------------------------
+
+EXAMPLE_PRODUCTS = Path(__file__).resolve().parents[2] / "examples" / "products.toml"
+
+
+def file_product(base=SYN500, prefix="S", defects_like=None, **changes):
+    """A FileProduct copied from a built-in product, as MBR-NEW100 unless changed."""
+    config = dataclasses.replace(base, **{"master_record_id": "MBR-NEW100", **changes})
+    return FileProduct(config, prefix, defects_like)
+
+
+def test_extra_line_reuses_the_named_defect_plan():
+    """defects_like copies that built-in plan's defects onto the new product."""
+    new = file_product(defects_like="MBR-SYN500")
+    (line,) = extra_lines((new,))
+    syn500_plan = PRODUCT_LINES[0].defect_plan
+    assert line.prefix == "S"
+    assert line.product == new.product
+    assert line.defect_plan.product == new.product
+    assert line.defect_plan.defects == syn500_plan.defects
+    assert line.defect_plan.comments == syn500_plan.comments
+
+
+def test_extra_line_without_defects_like_is_clean_only():
+    """Without defects_like the product's line has no defect plan."""
+    (line,) = extra_lines((file_product(),))
+    assert line.defect_plan is None
+
+
+@pytest.mark.parametrize(
+    ("products", "reason"),
+    [
+        ((file_product(prefix="B"),), "letter B"),
+        (
+            (file_product(), file_product(master_record_id="MBR-NEW200")),
+            "letter S",
+        ),
+        (
+            (file_product(master_record_id="MBR-SYN500", master_version="3"),),
+            "MBR-SYN500 v3",
+        ),
+        (
+            (
+                file_product(master_version="2"),
+                file_product(master_version="2", prefix="T"),
+            ),
+            "MBR-NEW100 v2",
+        ),
+        ((file_product(defects_like="MBR-NOPE"),), "MBR-NOPE"),
+        ((file_product(base=PLC250, defects_like="MBR-SYN500"),), "template"),
+        (
+            (
+                file_product(
+                    defects_like="MBR-SYN500",
+                    limits={**SYN500.limits, "S-GRAN-01": ("", "20.0")},
+                ),
+            ),
+            "S-GRAN-01",
+        ),
+    ],
+    ids=[
+        "builtin_letter",
+        "duplicate_letter",
+        "builtin_master",
+        "duplicate_master",
+        "unknown_defects_like",
+        "template_mismatch",
+        "defect_cannot_plant",
+    ],
+)
+def test_extra_lines_refuses_clashes_and_unusable_plans(products, reason):
+    """Clashing letters or masters, and defect plans that can't apply, are refused."""
+    with pytest.raises(ValueError, match=reason):
+        extra_lines(products)
+
+
+def master_ids_in(out):
+    """Distinct master_record_ids in out/master_record.csv, in order."""
+    with (out / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        return list(dict.fromkeys(r["master_record_id"] for r in csv.DictReader(f)))
+
+
+def test_without_products_only_built_in_masters(tmp_path):
+    """No --products flag: only the two built-in products are generated."""
+    run(tmp_path, "--batches", "6")
+    assert master_ids_in(tmp_path) == ["MBR-SYN500", "MBR-PLC250"]
+
+
+def test_products_file_adds_a_line(tmp_path):
+    """--products adds the file's product as a third line, with its defects."""
+    run(tmp_path, "--batches", "8", "--products", str(EXAMPLE_PRODUCTS))
+    assert master_ids_in(tmp_path) == ["MBR-SYN500", "MBR-PLC250", "MBR-SYN100"]
+    assert batch_ids_in(tmp_path) == [
+        "B26-0001",
+        "P26-0001",
+        "S26-0001",
+        "B26-0002",
+        "P26-0002",
+        "S26-0002",
+        "B26-0003",
+        "P26-0003",
+    ]
+    with (tmp_path / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        flagged = {r["batch_id"] for r in csv.DictReader(f)}
+    assert flagged == {"B26-0002", "P26-0002", "S26-0002"}
+
+
+def test_products_output_matches_the_rule_check(tmp_path):
+    """For every batch, file products included, the rules find what is expected."""
+    run(tmp_path, "--batches", "9", "--products", str(EXAMPLE_PRODUCTS))
+    with (tmp_path / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        masters = [MasterRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        batches = [BatchRow(**r) for r in csv.DictReader(f)]
+    with (tmp_path / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        expected = list(csv.DictReader(f))
+    by_batch = {}
+    for row in batches:
+        by_batch.setdefault(row.batch_id, []).append(row)
+    for batch_id, rows in by_batch.items():
+        master = [m for m in masters if m.master_record_id == rows[0].master_record_id]
+        found = sorted(
+            tuple(reversed(f.split(":"))) for f in rule_violations(master, rows)
+        )
+        listed = sorted(
+            (e["step_id"], e["rule_id"]) for e in expected if e["batch_id"] == batch_id
+        )
+        assert found == listed, batch_id
+
+
+def test_same_products_file_gives_byte_identical_files(tmp_path):
+    """The products file is part of what fixes the output."""
+    for name in ("a", "b"):
+        run(tmp_path / name, "--batches", "6", "--products", str(EXAMPLE_PRODUCTS))
+    assert files_of(tmp_path / "a") == files_of(tmp_path / "b")
+
+
+@pytest.mark.parametrize("letter", ["B", "s"])
+def test_bad_products_file_is_a_usage_error(letter, tmp_path, capsys):
+    """An unusable products file exits 2 with the reason, and writes nothing."""
+    text = EXAMPLE_PRODUCTS.read_text(encoding="utf-8").replace(
+        'id_letter        = "S"', f'id_letter        = "{letter}"'
+    )
+    products = tmp_path / "products.toml"
+    products.write_text(text, encoding="utf-8")
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as excinfo:
+        run(out, "--products", str(products))
+    assert excinfo.value.code == 2
+    assert "argument --products" in capsys.readouterr().err
+    assert not out.exists()
