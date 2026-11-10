@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Overview · Batch Record Review{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p class="lead">Each batch record is checked step by step against its approved master record. Here is what needs a person's attention.</p>
+  </div>
+  <a class="btn btn-primary" href="{{ url_for('index') }}">
+    <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>All batches
+  </a>
+</div>
+
+<section class="stat-grid" aria-label="Batches by result">
+  <a class="stat" href="{{ url_for('index') }}">
+    <span class="stat-label">Batches reviewed</span>
+    <span class="stat-value">{{ stats.total }}</span>
+    <span class="stat-foot">{{ stats.findings }} findings in total</span>
+  </a>
+  <a class="stat stat-critical" href="{{ url_for('index', status='critical') }}">
+    <span class="stat-label"><span class="dot dot-critical"></span>Critical</span>
+    <span class="stat-value">{{ stats['critical'] }}</span>
+    <span class="stat-foot">Look at these first</span>
+  </a>
+  <a class="stat stat-needs-review" href="{{ url_for('index', status='needs-review') }}">
+    <span class="stat-label"><span class="dot dot-needs-review"></span>Needs Review</span>
+    <span class="stat-value">{{ stats['needs-review'] }}</span>
+    <span class="stat-foot">One issue per step</span>
+  </a>
+  <a class="stat stat-no-findings" href="{{ url_for('index', status='no-findings') }}">
+    <span class="stat-label"><span class="dot dot-no-findings"></span>No Findings</span>
+    <span class="stat-value">{{ stats['no-findings'] }}</span>
+    <span class="stat-foot">Every step matched</span>
+  </a>
+</section>
+
+<div class="split">
+  <section class="card" aria-labelledby="attention-title">
+    <div class="card-head">
+      <h2 id="attention-title">Needs attention</h2>
+      {% if attention %}<a class="link" href="{{ url_for('index', status='attention') }}">View all</a>{% endif %}
+    </div>
+    {% if attention %}
+    <ul class="attention-list">
+      {% for row in attention[:8] %}
+      <li>
+        <a class="attention-item" href="{{ url_for('batch_page', batch_id=row.batch_id) }}">
+          <span class="attention-main">
+            <span class="id">{{ row.batch_id }}</span>
+            <span class="muted">{{ row.product }}</span>
+          </span>
+          <span class="attention-side">
+            <span class="{{ result_class(row.result) }}">{{ row.result }}</span>
+            <span class="muted small">{{ row.findings }} finding{% if row.findings != 1 %}s{% endif %}</span>
+          </span>
+          <svg class="icon chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+      <svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+      <p>Nothing needs attention. Every reviewed batch matched its master record.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="how-title">
+    <div class="card-head"><h2 id="how-title">How it works</h2></div>
+    <ol class="how">
+      <li><span class="how-num">1</span><div><strong>Records come in</strong><p>The approved master record (the recipe) and the batch record (what operators wrote down).</p></div></li>
+      <li><span class="how-num">2</span><div><strong>Eight checks run</strong><p>Readings in range, units match, signatures present, a second person checked critical steps, and times in order.</p></div></li>
+      <li><span class="how-num">3</span><div><strong>A person reviews</strong><p>Open a flagged batch, read each finding, add notes, and download the history for audit.</p></div></li>
+    </ol>
+    <a class="link" href="{{ url_for('guide_page') }}">Read what each check and result means</a>
+  </section>
+</div>
+{% endblock %}

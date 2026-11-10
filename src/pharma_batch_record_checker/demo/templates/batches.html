@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Batches · Batch Record Review{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Batches</h1>
+    <p class="lead">Every stored batch and the result of its latest review. Select a batch to see its findings.</p>
+  </div>
+</div>
+
+<form class="toolbar" method="get" action="{{ url_for('index') }}" role="search">
+  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+  <label class="field search">
+    <span class="sr-only">Search batches</span>
+    <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+    <input type="search" name="q" value="{{ query }}" placeholder="Search batch, product or master" autocomplete="off" data-live-search>
+  </label>
+  <div class="datepicker" data-datepicker data-review-days='{{ review_days|tojson }}'>
+    <label class="field date-field">
+      <span class="sr-only">Reviewed on (UTC)</span>
+      <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>
+      <input type="date" name="on" value="{{ on }}" data-date-input>
+    </label>
+  </div>
+  <button class="btn btn-primary" type="submit">Apply</button>
+  {% if status or query or on %}
+  <a class="btn btn-ghost" href="{{ url_for('index') }}">
+    <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Clear
+  </a>
+  {% endif %}
+</form>
+
+{% if day_error %}
+<p class="alert" role="alert"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{{ day_error }}</p>
+{% endif %}
+
+<nav class="tabs" aria-label="Filter by result">
+  {% set tabs = [('', 'All', stats.total), ('critical', 'Critical', stats['critical']), ('needs-review', 'Needs Review', stats['needs-review']), ('no-findings', 'No Findings', stats['no-findings'])] %}
+  {% for value, label, count in tabs %}
+  <a class="tab{% if value %} tab-{{ value }}{% endif %}" href="{{ url_for('index', status=value or None, q=query or None, on=on or None) }}"{% if status == value %} aria-current="true"{% endif %}>
+    {% if value %}<span class="dot dot-{{ value }}"></span>{% endif %}{{ label }}<span class="count">{{ count }}</span>
+  </a>
+  {% endfor %}
+</nav>
+
+{% if mode == "runs" %}
+<p class="context">
+  <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>
+  Reviews stored on <strong>{{ day.strftime('%a %-d %b %Y') }}</strong> (UTC)
+</p>
+  {% if runs %}
+  <div class="table-card">
+    <table class="data-table" data-filterable>
+      <thead>
+        <tr><th>Batch</th><th>Reviewed</th><th>Rule version</th><th>Result</th><th class="sr-col"><span class="sr-only">Open</span></th></tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr data-href="{{ url_for('batch_page', batch_id=run.batch_id) }}" data-search="{{ run.batch_id|lower }}">
+          <td class="c-key"><a class="id" href="{{ url_for('batch_page', batch_id=run.batch_id) }}">{{ run.batch_id }}</a></td>
+          <td class="c-meta num-font">{{ format_store_time(run.created_at) }}</td>
+          <td class="c-meta" data-label="Rule version">{{ run.rule_version }}</td>
+          <td class="c-result"><span class="{{ result_class(run.result_category) }}">{{ run.result_category }}</span></td>
+          <td class="c-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state card">
+    <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>
+    <p>{% if status %}No matching reviews were stored on this day.{% else %}No reviews were stored on this day.{% endif %} Days with reviews are marked with a dot in the calendar.</p>
+  </div>
+  {% endif %}
+{% elif rows %}
+<div class="table-card">
+  <table class="data-table" data-filterable>
+    <thead>
+      <tr>
+        <th>Batch</th>
+        <th>Product</th>
+        <th>Master record</th>
+        <th>Result</th>
+        <th class="num">Steps flagged</th>
+        <th class="num">Findings</th>
+        <th>Last reviewed</th>
+        <th class="sr-col"><span class="sr-only">Open</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr data-href="{{ url_for('batch_page', batch_id=row.batch_id) }}" data-search="{{ row.search }}">
+        <td class="c-key"><a class="id" href="{{ url_for('batch_page', batch_id=row.batch_id) }}">{{ row.batch_id }}</a></td>
+        <td class="c-full">{{ row.product }}</td>
+        <td class="c-meta">{{ row.master }}</td>
+        <td class="c-result">{% if row.result %}<span class="{{ result_class(row.result) }}">{{ row.result }}</span>{% else %}<span class="badge badge-none">Not reviewed</span>{% endif %}</td>
+        <td class="num c-meta" data-label="Steps flagged">{{ row.steps if row.steps is not none else '–' }}</td>
+        <td class="num c-meta" data-label="Findings">{{ row.findings if row.findings is not none else '–' }}</td>
+        <td class="c-meta c-hide-sm">{% if row.reviewed %}{{ format_day(row.reviewed) }}{% else %}–{% endif %}</td>
+        <td class="c-go"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="no-match" hidden data-no-match>No batch matches that search.</p>
+</div>
+{% else %}
+<div class="empty-state card">
+  <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+  <p>{% if status or query %}No batches match these filters.{% else %}No batches are stored yet.{% endif %}</p>
+</div>
+{% endif %}
+{% endblock %}

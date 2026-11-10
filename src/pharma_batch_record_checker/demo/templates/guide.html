@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Guide & glossary · Batch Record Review{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div>
+    <h1>Guide &amp; glossary</h1>
+    <p class="lead">Everything you need to read a review, with no pharma background required.</p>
+  </div>
+</div>
+
+<nav class="toc card" aria-label="On this page">
+  <a href="#results">Results</a>
+  <a href="#checks">The eight checks</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#faq">FAQ</a>
+</nav>
+
+<section class="card" id="results" aria-labelledby="results-title">
+  <h2 id="results-title">What the results mean</h2>
+  <dl class="result-list">
+    {% for word, meaning in result_guide %}
+    <div><dt><span class="{{ result_class(word) }}">{{ word }}</span></dt><dd>{{ meaning }}</dd></div>
+    {% endfor %}
+  </dl>
+</section>
+
+<section class="card" id="checks" aria-labelledby="checks-title">
+  <h2 id="checks-title">The eight checks</h2>
+  <p class="muted">Every step of every batch goes through these. Each failed check becomes one finding.</p>
+  <ul class="check-grid">
+    {% for guide in rule_guide.values() %}
+    <li><h3><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>{{ guide.title }}</h3><p>{{ guide.meaning }}</p></li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card" id="glossary" aria-labelledby="glossary-title">
+  <h2 id="glossary-title">Glossary</h2>
+  <dl class="terms terms-wide">
+    {% for term in glossary|sort(attribute='term') %}
+    <div id="term-{{ term.key }}"><dt>{{ term.term }}</dt><dd>{{ term.meaning }}</dd></div>
+    {% endfor %}
+  </dl>
+</section>
+
+<section class="card" id="faq" aria-labelledby="faq-title">
+  <h2 id="faq-title">Frequently asked questions</h2>
+  <div class="faq">
+    {% for question, answer in faq %}
+    <details{% if loop.first %} open{% endif %}><summary>{{ question }}</summary><p>{{ answer }}</p></details>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+{% block help %}{% endblock %}

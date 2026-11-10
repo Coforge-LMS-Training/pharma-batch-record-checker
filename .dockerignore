@@ -1,0 +1,24 @@
+# Keep the build context small and keep anything private out of the image.
+
+# Client sample CSVs: never baked into an image.
+sample/
+# Generated datasets live in the pharma_data volume, not the image.
+data/
+# Secrets and personal notes.
+.env
+CLAUDE.local.md
+.claude/
+.impeccable/
+
+# Tooling state.
+.git
+.github/
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.DS_Store
+
+# Not needed at runtime.
+tests/
+docs/
