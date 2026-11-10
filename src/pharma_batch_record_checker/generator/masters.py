@@ -91,10 +91,15 @@ def build_master(config: ProductConfig) -> list[MasterRow]:
     ]
 
 
+def duplicate_step_ids(process: Sequence[StepTemplate]) -> list[str]:
+    """step_ids used more than once in a process, sorted, each listed once."""
+    ids = [s.step_id for s in process]
+    return sorted({i for i in ids if ids.count(i) > 1})
+
+
 def _check_process(config: ProductConfig) -> None:
     """step_id is part of the join key, so it must be unique within a process."""
-    ids = [s.step_id for s in config.process]
-    if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
+    if duplicates := duplicate_step_ids(config.process):
         raise ValueError(f"{config.master_record_id}: duplicate step_ids {duplicates}")
 
 

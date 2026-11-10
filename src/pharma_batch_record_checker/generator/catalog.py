@@ -37,11 +37,15 @@ from pharma_batch_record_checker.generator.masters import (
     ProductConfig,
     StepTemplate,
     build_master,
+    duplicate_step_ids,
 )
 
 Text = Annotated[str, StringConstraints(strict=True)]
+# Text that must say something, like every text cell in the CSV contract.
+NonBlank = Annotated[str, StringConstraints(strict=True, pattern=r"\S")]
 Letter = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z]$")]
-# [min, max] as written; a TOML array is a list, so it is converted to a tuple.
+# [min, max] as written; "" means no limit, so limits may be empty. A TOML
+# array is a list, so it is converted to a tuple.
 Limit = Annotated[list[Text], Field(min_length=2, max_length=2)]
 
 # What a file stem must look like to be used as a name.
@@ -61,19 +65,19 @@ class _StepEntry(_Strict):
     neither (StepTemplate enforces this).
     """
 
-    step_id: Text
-    unit_procedure: Text
-    operation: Text
-    phase: Text
-    parameter: Text | None = None
-    unit: Text | None = None
+    step_id: NonBlank
+    unit_procedure: NonBlank
+    operation: NonBlank
+    phase: NonBlank
+    parameter: NonBlank | None = None
+    unit: NonBlank | None = None
     critical: bool
 
 
 class _TemplateFile(_Strict):
     """A template file: a description and at least one step."""
 
-    description: Text
+    description: NonBlank
     step: list[_StepEntry] = Field(min_length=1)
 
 
@@ -89,8 +93,7 @@ def load_templates(
     for name, path in _named_files(folder):
         parsed = _parse(path, _TemplateFile)
         steps = tuple(_step(path, entry) for entry in parsed.step)
-        ids = [s.step_id for s in steps]
-        if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
+        if duplicates := duplicate_step_ids(steps):
             raise ValueError(f"{path}: duplicate step_ids {duplicates}")
         templates[name] = steps
     return MappingProxyType(templates)
@@ -126,18 +129,18 @@ class DefectPlanSpec:
 class _DefectEntry(_Strict):
     """One [[defect]]: break rule_id on step_id (side/unit as in Defect)."""
 
-    step_id: Text
+    step_id: NonBlank
     rule_id: RuleId
     side: Literal["low", "high"] | None = None
-    unit: Text | None = None
+    unit: NonBlank | None = None
 
 
 class _PlanFile(_Strict):
     """A defect plan file: its template, at least one defect, and comments."""
 
-    template: Text
+    template: NonBlank
     defect: list[_DefectEntry] = Field(min_length=1)
-    comments: dict[Text, Text] = Field(default_factory=dict)
+    comments: dict[NonBlank, NonBlank] = Field(default_factory=dict)
 
 
 def load_defect_plans(
@@ -207,16 +210,16 @@ class Catalog:
 class _ProductFile(_Strict):
     """A product file, as written: identity, template, ID letter, limits, plan."""
 
-    master_record_id: Text
-    master_version: Text
-    product_name: Text
-    batch_size: Text
-    batch_size_unit: Text
-    excipient: Text
-    template: Text
+    master_record_id: NonBlank
+    master_version: NonBlank
+    product_name: NonBlank
+    batch_size: NonBlank
+    batch_size_unit: NonBlank
+    excipient: NonBlank
+    template: NonBlank
     id_letter: Letter
-    defect_plan: Text | None = None
-    limits: dict[Text, Limit]
+    defect_plan: NonBlank | None = None
+    limits: dict[NonBlank, Limit]
 
 
 def load_catalog(folder: str | os.PathLike[str]) -> Catalog:
@@ -285,7 +288,7 @@ def _named_files(folder: str | os.PathLike[str]) -> list[tuple[str, Path]]:
         raise ValueError(f"{folder}: no such folder")
     files = []
     for path in sorted(folder.glob("*.toml")):
-        if not NAME_PATTERN.match(path.stem):
+        if not NAME_PATTERN.fullmatch(path.stem):
             raise ValueError(
                 f"{path}: file name must be a lower-case name "
                 "(letters, digits, underscores), e.g. oral_liquid.toml"

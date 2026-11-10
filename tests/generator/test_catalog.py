@@ -137,6 +137,31 @@ def test_template_name_must_be_a_simple_lower_case_name(tmp_path):
     assert "name" in refused_templates(tmp_path, MINI_TEMPLATE, name="Oral-Liquid.toml")
 
 
+def test_template_name_with_a_trailing_newline_is_refused(tmp_path):
+    """A stem like 'mini\\n' is not a simple name, even though '$' would match it."""
+    assert "name" in refused_templates(tmp_path, MINI_TEMPLATE, name="mini\n.toml")
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ('step_id        = "S-MIX-01"', 'step_id = " "'),
+        ('unit           = "min"', 'unit = "  "'),
+        ('phase          = "Mix"', 'phase = ""'),
+    ],
+    ids=["blank_step_id", "blank_unit", "empty_phase"],
+)
+def test_blank_template_text_is_refused_even_if_unused(tmp_path, old, new):
+    """Text can't be blank (as in the CSV contract), checked when the template loads.
+
+    No product uses this template, so build_master never runs on it; the
+    check must still catch the blank value.
+    """
+    assert old in MINI_TEMPLATE
+    message = refused_templates(tmp_path, MINI_TEMPLATE.replace(old, new, 1))
+    assert "should match pattern" in message
+
+
 def test_invalid_toml_template_is_refused(tmp_path):
     """A TOML syntax error names the file."""
     assert "invalid TOML" in refused_templates(tmp_path, "[[step]\n")
