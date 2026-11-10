@@ -27,14 +27,23 @@ from pharma_batch_record_checker.generator.batches import (
     generate_clean_batch,
 )
 from pharma_batch_record_checker.generator.catalog import CatalogProduct, load_catalog
-from pharma_batch_record_checker.generator.dataset_io import write_dataset
+from pharma_batch_record_checker.generator.dataset_io import (
+    BATCH_FILE,
+    EXPECTED_FILE,
+    MASTER_FILE,
+    write_dataset,
+)
 from pharma_batch_record_checker.generator.defects import (
     BATCH_PLANS,
     BatchPlan,
+    Dataset,
     build_dataset,
     plant_defects,
 )
-from pharma_batch_record_checker.generator.expected_findings import DefectLog
+from pharma_batch_record_checker.generator.expected_findings import (
+    RULE_IDS,
+    DefectLog,
+)
 from pharma_batch_record_checker.generator.masters import (
     PLC250,
     SYN500,
@@ -314,6 +323,109 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def summarize(dataset: Dataset, out: Path, line_count: int | None = None) -> str:
+    """What was written, for people: the first line, then the details.
+
+    Lists each product line (letter, master, name, batches, defective
+    batches), findings by severity and by rule (naming rules not planted),
+    the span of timestamps, and the files. line_count is how many product
+    lines the run alternated (default: the masters present); it sizes the
+    --batches hint when no defects were planted. The text depends only on
+    the dataset and out, so the same run always prints the same summary.
+    """
+    batch_ids = list(dict.fromkeys(row.batch_id for row in dataset.batches))
+    first = (
+        f"wrote {len(batch_ids)} batches, {len(dataset.findings)} expected "
+        f"findings to {out}"
+    )
+    lines = [
+        first,
+        "  products:",
+        *_product_lines(dataset),
+        _findings_line(dataset, line_count),
+    ]
+    if dataset.findings:
+        lines.append(_rules_line(dataset))
+    stamps = [
+        stamp
+        for row in dataset.batches
+        for stamp in (row.performed_at, row.verified_at)
+        if stamp is not None
+    ]
+    if stamps:
+        lines.append(
+            f"  time span: {min(stamps):{TIMESTAMP_FORMAT}} to "
+            f"{max(stamps):{TIMESTAMP_FORMAT}}"
+        )
+    lines.append(f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}")
+    return "\n".join(lines)
+
+
+def _product_lines(dataset: Dataset) -> list[str]:
+    """One aligned line per master: letter, id and version, name, batch counts."""
+    names: dict[tuple[str, str], str] = {}
+    for row in dataset.masters:
+        names.setdefault((row.master_record_id, row.master_version), row.product_name)
+    batches: dict[tuple[str, str], list[str]] = {key: [] for key in names}
+    for row in dataset.batches:
+        ids = batches.setdefault((row.master_record_id, row.master_version), [])
+        if row.batch_id not in ids:
+            ids.append(row.batch_id)
+    defective = {f.batch_id for f in dataset.findings}
+    rows = [
+        (
+            ids[0][0] if ids else "?",
+            f"{master_id} v{version}",
+            names[(master_id, version)],
+            (
+                f"{len(ids)} batch{'' if len(ids) == 1 else 'es'}, "
+                f"{sum(b in defective for b in ids)} defective"
+            ),
+        )
+        for (master_id, version), ids in batches.items()
+    ]
+    id_width = max(len(r[1]) for r in rows)
+    name_width = max(len(r[2]) for r in rows)
+    return [
+        f"    {letter}  {master:<{id_width}}  {name:<{name_width}}  {counts}"
+        for letter, master, name, counts in rows
+    ]
+
+
+def _findings_line(dataset: Dataset, line_count: int | None) -> str:
+    """Findings by severity and the steps they are on, or why there are none."""
+    findings = dataset.findings
+    if not findings:
+        lines = line_count or len(
+            {(m.master_record_id, m.master_version) for m in dataset.masters}
+        )
+        return (
+            "  findings: none (a line's defects start at its 2nd batch; "
+            f"use --batches {lines + 1} or more)"
+        )
+    critical = sum(f.severity == "Critical" for f in findings)
+    steps = len({(f.batch_id, f.step_id) for f in findings})
+    return (
+        f"  findings: {critical} Critical, {len(findings) - critical} Needs Review, "
+        f"on {steps} steps"
+    )
+
+
+def _rules_line(dataset: Dataset) -> str:
+    """Findings per rule in the agreed rule order, and which rules have none."""
+    counts = {rule: 0 for rule in RULE_IDS}
+    for finding in dataset.findings:
+        counts[finding.rule_id] += 1
+    listed = ", ".join(f"{rule} {n}" for rule, n in counts.items() if n)
+    missing = [rule for rule, n in counts.items() if not n]
+    note = (
+        f"all {len(RULE_IDS)} planted"
+        if not missing
+        else f"not planted: {', '.join(missing)}"
+    )
+    return f"  rules: {listed} ({note})"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command and return its exit code.
 
@@ -332,10 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
-        f"wrote {args.batches} batches, {len(dataset.findings)} expected findings "
-        f"to {args.out}"
-    )
+    print(summarize(dataset, args.out, len(PRODUCT_LINES) + len(args.catalog)))
     return 0
 
 

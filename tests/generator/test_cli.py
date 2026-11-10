@@ -23,6 +23,7 @@ from pharma_batch_record_checker.generator.cli import (
     main,
     parse_start,
     plan_batches,
+    summarize,
 )
 from pharma_batch_record_checker.generator.dataset_io import (
     BATCH_FILE,
@@ -228,13 +229,93 @@ def test_leaves_other_files_alone(tmp_path):
     assert (tmp_path / "notes.txt").read_text() == "keep me"
 
 
-def test_summary_line(tmp_path, capsys):
-    """The command prints one deterministic summary line."""
-    run(tmp_path, "--seed", "0", "--batches", "4")
+def summary_of(tmp_path, capsys, *args):
+    """The lines the command prints for --out tmp_path plus args."""
+    run(tmp_path, *args)
+    return capsys.readouterr().out.splitlines()
+
+
+def expected_rows(out):
+    """Rows of out/expected_findings.csv as dicts."""
+    with (out / EXPECTED_FILE).open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_summary_first_line_is_unchanged(tmp_path, capsys):
+    """The first line still says how many batches and findings went where."""
     expected = len(build_dataset(0, plan_batches(4)).findings)
-    assert capsys.readouterr().out == (
-        f"wrote 4 batches, {expected} expected findings to {tmp_path}\n"
+    lines = summary_of(tmp_path, capsys, "--seed", "0", "--batches", "4")
+    assert lines[0] == f"wrote 4 batches, {expected} expected findings to {tmp_path}"
+
+
+def test_summary_is_deterministic(tmp_path, capsys):
+    """The same arguments print the same summary (apart from --out)."""
+    a = summary_of(tmp_path / "a", capsys, "--batches", "6")
+    b = summary_of(tmp_path / "b", capsys, "--batches", "6")
+    assert a[1:-1] == b[1:-1]
+
+
+def test_summary_lists_each_product_line(tmp_path, capsys):
+    """One line per product: letter, master, name, batches and defective batches."""
+    lines = summary_of(tmp_path, capsys, "--batches", "5")
+    assert lines[1] == "  products:"
+    b_line, p_line = lines[2], lines[3]
+    assert b_line.split()[:3] == ["B", "MBR-SYN500", "v3"]
+    assert "Synthetol 500 mg film-coated tablets" in b_line
+    assert b_line.endswith("3 batches, 1 defective")
+    assert p_line.split()[:3] == ["P", "MBR-PLC250", "v1"]
+    assert p_line.endswith("2 batches, 1 defective")
+
+
+def test_summary_counts_findings_by_severity_steps_and_rule(tmp_path, capsys):
+    """Severity, flagged-step and per-rule counts match expected_findings.csv."""
+    lines = summary_of(tmp_path, capsys, "--batches", "4")
+    rows = expected_rows(tmp_path)
+    critical = sum(r["severity"] == "Critical" for r in rows)
+    steps = len({(r["batch_id"], r["step_id"]) for r in rows})
+    assert (
+        f"  findings: {critical} Critical, {len(rows) - critical} Needs Review, "
+        f"on {steps} steps"
+    ) in lines
+    per_rule = ", ".join(
+        f"{rule} {sum(r['rule_id'] == rule for r in rows)}" for rule in RULE_IDS
     )
+    assert f"  rules: {per_rule} (all 8 planted)" in lines
+
+
+def test_summary_names_rules_that_were_not_planted():
+    """When some rules have no finding, the summary says which."""
+    capsule_defects = plan_batches(4)[3:4]  # P26-0002 only: no missing_reading
+    text = summarize(build_dataset(0, capsule_defects), Path("out"))
+    assert "(not planted: missing_reading)" in text
+
+
+def test_summary_explains_a_dataset_without_defects(tmp_path, capsys):
+    """With only first batches, there are no findings, and the summary says why."""
+    lines = summary_of(tmp_path, capsys, "--batches", "2")
+    assert (
+        "  findings: none (a line's defects start at its 2nd batch; "
+        "use --batches 3 or more)"
+    ) in lines
+    assert not any(line.startswith("  rules:") for line in lines)
+    assert lines[2].endswith("1 batch, 0 defective")
+
+
+def test_summary_shows_the_time_span_and_files(tmp_path, capsys):
+    """The first and last timestamps in the batch file, and the three files."""
+    lines = summary_of(tmp_path, capsys, "--batches", "4")
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    stamps = [r[c] for r in rows for c in ("performed_at", "verified_at") if r[c]]
+    assert f"  time span: {min(stamps)} to {max(stamps)}" in lines
+    assert lines[-1] == f"  files: {MASTER_FILE}, {BATCH_FILE}, {EXPECTED_FILE}"
+
+
+def test_summary_lists_catalog_products_too(tmp_path, capsys):
+    """Catalog products get their own lines, after B and P."""
+    lines = summary_of(tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG))
+    letters = [line.split()[0] for line in lines[2:7]]
+    assert letters == ["B", "P", "L", "F", "M"]
 
 
 def test_out_is_required(capsys):
