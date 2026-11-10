@@ -241,3 +241,42 @@ def test_prepare_explains_an_overlapping_dataset(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert f"Nothing new loaded from {data}" in out
     assert "docker compose down -v" in out
+
+
+def fake_app(order):
+    """An app whose run() records its call in order instead of serving."""
+    return type("App", (), {"run": lambda self, **kwargs: order.append("run")})()
+
+
+def test_main_passes_data_to_prepare(monkeypatch):
+    """--data DIR prepares that folder, then serves."""
+    monkeypatch.setattr("sys.argv", ["pharma-review-demo", "--data", "data"])
+    order = []
+    monkeypatch.setattr(cli, "prepare", lambda *args: order.append(("prepare", args)))
+    monkeypatch.setattr(cli, "create_app", lambda: fake_app(order))
+    cli.main()
+    assert order == [("prepare", (Path("data"),)), "run"]
+
+
+def test_main_without_data_prepares_the_sample(monkeypatch):
+    """Without --data, prepare gets no arguments and loads the approved sample."""
+    monkeypatch.setattr("sys.argv", ["pharma-review-demo"])
+    order = []
+    monkeypatch.setattr(cli, "prepare", lambda *args: order.append(("prepare", args)))
+    monkeypatch.setattr(cli, "create_app", lambda: fake_app(order))
+    cli.main()
+    assert order == [("prepare", ()), "run"]
+
+
+def test_data_with_no_setup_is_a_usage_error(monkeypatch, capsys):
+    """--data needs setup to load anything, so --no-setup with it is refused."""
+    monkeypatch.setattr(
+        "sys.argv", ["pharma-review-demo", "--data", "data", "--no-setup"]
+    )
+    monkeypatch.setattr(
+        cli, "create_app", lambda: (_ for _ in ()).throw(AssertionError("served"))
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 2
+    assert "--data" in capsys.readouterr().err
