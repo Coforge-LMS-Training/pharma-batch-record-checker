@@ -4,15 +4,18 @@ import csv
 import dataclasses
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import datetime
+from itertools import pairwise
 
 import pytest
 
 import pharma_batch_record_checker.generator.cli as cli_module
 from pharma_batch_record_checker.generator.cli import (
+    CHANGEOVER,
     MAX_BATCHES,
     PRODUCT_LINES,
     ProductLine,
+    batch_span,
     main,
     plan_batches,
 )
@@ -28,6 +31,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
 )
 from pharma_batch_record_checker.generator.masters import SYN500
 from pharma_batch_record_checker.schema import BATCH_HEADER, MASTER_HEADER
+from tests.generator.rule_oracle import rule_violations
 
 # --- Planning N batches -------------------------------------------------------
 
@@ -72,15 +76,62 @@ def test_four_batches_cover_all_eight_rules():
     assert {f.rule_id for f in dataset.findings} == set(RULE_IDS)
 
 
-def test_start_times_are_deterministic():
-    """A product's k-th batch starts at 07:00 on day k, from 2026-10-12."""
-    starts = {p.batch_id: p.start for p in plan_batches(4)}
+def test_start_times_follow_back_to_back_schedule():
+    """Each line starts its next batch one span plus a changeover after the last.
+
+    Tablet cycle is 10 h 50 min, capsule 7 h 50 min, both from 2026-10-12 07:00.
+    """
+    starts = {p.batch_id: p.start for p in plan_batches(6)}
     assert starts == {
         "B26-0001": datetime(2026, 10, 12, 7, 0),
         "P26-0001": datetime(2026, 10, 12, 7, 0),
-        "B26-0002": datetime(2026, 10, 13, 7, 0),
-        "P26-0002": datetime(2026, 10, 13, 7, 0),
+        "B26-0002": datetime(2026, 10, 12, 17, 50),
+        "P26-0002": datetime(2026, 10, 12, 14, 50),
+        "B26-0003": datetime(2026, 10, 13, 4, 40),
+        "P26-0003": datetime(2026, 10, 12, 22, 40),
     }
+
+
+def by_line(plans):
+    """Plans grouped by master_record_id, in plan order."""
+    grouped = {}
+    for plan in plans:
+        grouped.setdefault(plan.product.master_record_id, []).append(plan)
+    return grouped
+
+
+def rows_by_batch(dataset):
+    """The dataset's batch rows grouped by batch_id."""
+    grouped = {}
+    for row in dataset.batches:
+        grouped.setdefault(row.batch_id, []).append(row)
+    return grouped
+
+
+def test_each_line_waits_for_previous_batch():
+    """On a line, starts are batch_span + CHANGEOVER apart and never overlap.
+
+    The gap is fixed by the plan, and the generated rows of each batch finish
+    (performed and verified) before the next batch on its line starts.
+    """
+    plans = plan_batches(20)
+    rows = rows_by_batch(build_dataset(0, plans))
+    for line in by_line(plans).values():
+        for prev, nxt in pairwise(line):
+            assert nxt.start - prev.start == batch_span(prev.product) + CHANGEOVER
+            times = [r.performed_at for r in rows[prev.batch_id]] + [
+                r.verified_at for r in rows[prev.batch_id]
+            ]
+            assert max(t for t in times if t is not None) < nxt.start
+
+
+def test_clean_batch_crossing_midnight_is_unflagged():
+    """P26-0003 runs from 22:40 past midnight and still breaks none of the 8 rules."""
+    dataset = build_dataset(0, plan_batches(8))
+    rows = rows_by_batch(dataset)["P26-0003"]
+    assert len({r.performed_at.date() for r in rows if r.performed_at}) == 2
+    master = [m for m in dataset.masters if m.master_record_id == "MBR-PLC250"]
+    assert rule_violations(master, rows) == []
 
 
 @pytest.mark.parametrize("n", [0, -1, MAX_BATCHES + 1])
@@ -253,7 +304,6 @@ def test_all_start_dates_stay_in_2026():
     """Even at the maximum, every batch starts in 2026, matching the '26' in its ID."""
     plans = plan_batches(MAX_BATCHES)
     assert {p.start.year for p in plans} == {2026}
-    assert max(p.start for p in plans).date() == date(2026, 12, 31)
 
 
 def test_unwritable_out_reports_error(tmp_path, capsys):

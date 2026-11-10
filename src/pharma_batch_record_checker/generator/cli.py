@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from pharma_batch_record_checker.generator.batches import (
+    STEP_INTERVAL,
+    VERIFY_DELAY_MINUTES,
+)
 from pharma_batch_record_checker.generator.dataset_io import write_dataset
 from pharma_batch_record_checker.generator.defects import (
     BATCH_PLANS,
@@ -60,6 +64,20 @@ LAST_DAY = date(2026, 12, 31)
 DAYS_AVAILABLE = (LAST_DAY - FIRST_START.date()).days + 1
 MAX_BATCHES = DAYS_AVAILABLE * len(PRODUCT_LINES)
 
+# Time between one batch's last possible timestamp and the next batch's first
+# step on the same line (cleaning and line clearance).
+CHANGEOVER = timedelta(hours=3)
+
+
+def batch_span(product: ProductConfig) -> timedelta:
+    """Longest time from a batch's first step to its last timestamp.
+
+    The last step is performed (steps - 1) step intervals after the first, and
+    may be verified up to the longest verification delay after that.
+    """
+    last_step = (len(product.process) - 1) * STEP_INTERVAL
+    return last_step + timedelta(minutes=max(VERIFY_DELAY_MINUTES))
+
 
 def check_batch_count(n: int) -> int:
     """Return n if it is a valid --batches value (1 to MAX_BATCHES), else raise."""
@@ -71,20 +89,26 @@ def check_batch_count(n: int) -> int:
 def plan_batches(n: int) -> tuple[BatchPlan, ...]:
     """Plan n batches: alternate product lines; a line's even-numbered batches are defective.
 
-    A line's k-th batch has ID <prefix>-<k:04d> (B26-0001, P26-0001, ...),
-    starts at 07:00 on day k from 2026-10-12, and is clean when k is odd and
+    A line's k-th batch has ID <prefix>-<k:04d> (B26-0001, P26-0001, ...).
+    Each line's first batch starts at FIRST_START, and each later one starts
+    batch_span + CHANGEOVER after the previous batch on that line, so batches
+    on a line never overlap and start times move around the clock. The
+    schedule doesn't depend on the seed. A batch is clean when k is odd and
     carries the line's defect plan when k is even (lines without one stay
     clean). B26-0002 carries the full tablet plan, so n >= 3 plants all eight
     rules.
     """
     check_batch_count(n)
     lines = PRODUCT_LINES
+    next_start = [FIRST_START] * len(lines)  # per line, by index
     plans = []
     for i in range(n):
-        line = lines[i % len(lines)]
+        index = i % len(lines)
+        line = lines[index]
         k = i // len(lines) + 1
         batch_id = f"{line.prefix}-{k:04d}"
-        start = FIRST_START + timedelta(days=k - 1)
+        start = next_start[index]
+        next_start[index] = start + batch_span(line.product) + CHANGEOVER
         if k % 2 == 0 and line.defect_plan is not None:
             plans.append(
                 dataclasses.replace(line.defect_plan, batch_id=batch_id, start=start)
