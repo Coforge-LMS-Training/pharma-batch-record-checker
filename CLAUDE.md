@@ -32,6 +32,8 @@ The range check is skipped when the reading is missing or the unit mismatches. E
 
 A step is **Critical** if it is a critical step with no second check, a critical step checked by the same person, or a critical step out of range, or if it has 2 or more findings. Otherwise it is **Needs Review**. A run's `result_category` is Critical, Needs Review or No Findings.
 
+Version-2 rules 9 `late_verification` (verified more than `late_verification_minutes`, default 60, after performed) and 10 `performed_out_of_order` (performed before the previous master step present in the batch) are implemented in `rules.py` but **off by default**: they run only with `RulesConfig(enable_v2_rules=True)`, and the default output is exactly the 8 rules above. They're `V2_RULE_IDS`, not in `RULE_IDS`, and `rule_version` stays 1.0.0 until the store accepts them. Alone, either is Needs Review, even on a critical step.
+
 ## Owners
 - Sarthak: generator and `expected_findings.csv`
 - Harshitha: parser and rule engine
