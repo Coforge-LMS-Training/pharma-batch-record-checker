@@ -1,4 +1,4 @@
-"""Review rules (rule_version 1.0.0), applied to matched step pairs.
+"""Review rules (rule_version 1.1.0), applied to matched step pairs.
 
 Each broken rule is its own `Finding`. Rules only read a step's values and
 never act on the operator comment (it is carried on the finding as data, for
@@ -7,14 +7,10 @@ converted. All numbers are Decimal.
 
 Implemented so far: unit_mismatch, missing_reading, out_of_range (PHA-62),
 missing_step, missing_performer (PHA-63), missing_second_check and same_person
-(PHA-64, critical steps only) and verifier_before_performer (PHA-65): all 8.
-Severity is decided later (PHA-66), not here.
-
-Version-2 rules 9 and 10 (late_verification, performed_out_of_order) are
-implemented but OFF by default: they run only with
-RulesConfig(enable_v2_rules=True). With the default config the output is
-exactly the 8 rules of rule_version 1.0.0. They stay out of RULE_IDS until the
-store accepts them.
+(PHA-64, critical steps only) and verifier_before_performer (PHA-65): the 8
+v1 rules. Version-2 rules 9 late_verification and 10 performed_out_of_order
+are on by default (rule_version 1.1.0); RulesConfig(enable_v2_rules=False)
+gives exactly the 8 v1 rules. Severity is decided later (PHA-66), not here.
 
 Unknown or duplicate executed step IDs are never findings: matching.py
 reports them as validation errors and doesn't hand those batches to the rules.
@@ -29,10 +25,10 @@ from pharma_batch_record_checker.matching import MatchedBatch, StepPair
 from pharma_batch_record_checker.records import BatchStep, MasterKey, MasterStep
 from pharma_batch_record_checker.schema import TIMESTAMP_FORMAT
 
-RULE_VERSION = "1.0.0"
+RULE_VERSION = "1.1.0"
 
-# The eight agreed rule IDs, spelled as in CLAUDE.md (rule_version 1.0.0).
-RuleId = Literal[
+# The eight v1 rule IDs, spelled as in CLAUDE.md (rule_version 1.0.0).
+RuleIdV1 = Literal[
     "out_of_range",
     "missing_reading",
     "missing_step",
@@ -42,7 +38,16 @@ RuleId = Literal[
     "verifier_before_performer",
     "unit_mismatch",
 ]
-RULE_IDS: tuple[str, ...] = get_args(RuleId)
+V1_RULE_IDS: tuple[str, ...] = get_args(RuleIdV1)
+
+# The two version-2 rules, spelled as in generator/expected_findings.py: rule 9
+# late_verification and rule 10 performed_out_of_order.
+V2RuleId = Literal["late_verification", "performed_out_of_order"]
+V2_RULE_IDS: tuple[str, ...] = get_args(V2RuleId)
+
+# All ten rules of rule_version 1.1.0, in the generator's order.
+RuleId = Literal[RuleIdV1, V2RuleId]
+RULE_IDS: tuple[str, ...] = V1_RULE_IDS + V2_RULE_IDS
 
 # PENDING CLIENT CONFIRMATION, open question 1 (overall plan v1, section 12):
 # when the unit is wrong or missing, the range check is skipped, because
@@ -51,23 +56,19 @@ RULE_IDS: tuple[str, ...] = get_args(RuleId)
 # unit_mismatch detail then stops saying the range wasn't checked.
 SKIP_RANGE_ON_UNIT_MISMATCH = True
 
-# Version-2 rules (9 and 10), spelled as in generator/expected_findings.py.
-# Not in RULE_IDS: they are off by default and the store doesn't accept them yet.
-V2RuleId = Literal["late_verification", "performed_out_of_order"]
-V2_RULE_IDS: tuple[str, ...] = get_args(V2RuleId)
-
 
 @dataclass(frozen=True)
 class RulesConfig:
-    """Options for the rules. The default gives exactly the 8 v1 rules.
+    """Options for the rules. The default runs all 10 rules (rule_version 1.1.0).
 
-    enable_v2_rules turns on late_verification and performed_out_of_order.
+    enable_v2_rules=False turns off late_verification and performed_out_of_order,
+    giving exactly the 8 v1 rules.
     late_verification_minutes is rule 9's threshold: a verification more than
     this many minutes after the performance is late (exactly this many passes).
     """
 
     late_verification_minutes: int = 60
-    enable_v2_rules: bool = False
+    enable_v2_rules: bool = True
 
     def __post_init__(self) -> None:
         """Refuse a threshold that isn't a positive whole number of minutes."""
@@ -93,7 +94,7 @@ class Finding:
     so it is master_unit and batch_unit here. Values keep their parsed types.
     """
 
-    rule_id: RuleId | V2RuleId
+    rule_id: RuleId
     batch_id: str
     step_id: str
     detail: str
@@ -148,15 +149,15 @@ def step_findings(
 
     A step with no batch row gives only missing_step. Otherwise the order is
     fixed: unit_mismatch, missing_reading, out_of_range, missing_performer,
-    missing_second_check, same_person, verifier_before_performer, then (only
-    with config.enable_v2_rules) late_verification and performed_out_of_order.
+    missing_second_check, same_person, verifier_before_performer, then (unless
+    config.enable_v2_rules is False) late_verification and performed_out_of_order.
     A sign-off-only step (no parameter) has no reading or unit to check; only
     critical steps get missing_second_check and same_person. `previous` is the
     previous present step's row (batch_findings passes it); None skips rule 10.
     """
     master, row = pair
 
-    def finding(rule_id: RuleId | V2RuleId, detail: str) -> Finding:
+    def finding(rule_id: RuleId, detail: str) -> Finding:
         return _finding(rule_id, batch_id, master_key, master, row, detail)
 
     if row is None:
@@ -302,7 +303,7 @@ def _out_of_order_detail(performed_at: datetime, previous: BatchStep) -> str:
 
 
 def _finding(
-    rule_id: RuleId | V2RuleId,
+    rule_id: RuleId,
     batch_id: str,
     master_key: MasterKey,
     master: MasterStep,

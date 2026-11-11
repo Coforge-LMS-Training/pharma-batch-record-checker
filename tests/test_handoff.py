@@ -145,9 +145,9 @@ def test_each_call_gets_rule_version_and_the_batchs_own_category(tmp_path):
     assert [
         (c["batch_id"], c["rule_version"], c["result_category"]) for c in store.calls
     ] == [
-        ("B26-0001", "1.0.0", "Critical"),
-        ("B26-0002", "1.0.0", "Needs Review"),
-        ("B26-0003", "1.0.0", "No Findings"),
+        ("B26-0001", "1.1.0", "Critical"),
+        ("B26-0002", "1.1.0", "Needs Review"),
+        ("B26-0003", "1.1.0", "No Findings"),
     ]
     assert store.calls[2]["findings"] == ()
 

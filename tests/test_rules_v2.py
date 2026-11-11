@@ -1,8 +1,8 @@
-"""Tests for version-2 rules 9 and 10, off by default. All data is synthetic.
+"""Tests for version-2 rules 9 and 10. All data is synthetic.
 
-late_verification (rule 9) and performed_out_of_order (rule 10) run only with
-RulesConfig(enable_v2_rules=True); the default config must give exactly the
-8 v1 rules. Expected behaviour follows tests/generator/rule_oracle.py.
+late_verification (rule 9) and performed_out_of_order (rule 10) are on by
+default since rule_version 1.1.0; RulesConfig(enable_v2_rules=False) gives
+exactly the 8 v1 rules. Expected behaviour follows tests/generator/rule_oracle.py.
 """
 
 import csv
@@ -17,7 +17,7 @@ from pharma_batch_record_checker.generator.batches import generate_clean_batch
 from pharma_batch_record_checker.generator.cli import main as generate
 from pharma_batch_record_checker.generator.masters import build_masters
 from pharma_batch_record_checker.matching import MatchedBatch, match_batches
-from pharma_batch_record_checker.parser import ParseResult, parse_files
+from pharma_batch_record_checker.parser import ParseResult
 from pharma_batch_record_checker.records import BatchStep, MasterVersion
 from pharma_batch_record_checker.review import review, step_severity
 from pharma_batch_record_checker.rules import (
@@ -32,6 +32,7 @@ REPO = Path(__file__).resolve().parents[1]
 SYN_ROWS = [r for r in build_masters() if r.master_record_id == "MBR-SYN500"]
 SYN_V3 = MasterVersion.from_rows(SYN_ROWS)
 V2_ON = RulesConfig(enable_v2_rules=True)
+V2_OFF = RulesConfig(enable_v2_rules=False)
 BATCH = "B26-0413"
 
 
@@ -211,17 +212,17 @@ def test_both_v2_rules_on_one_step_are_critical():
 # --- Default config ----------------------------------------------------------------------
 
 
-def test_default_config_gives_no_v2_findings():
-    """With the default config, a batch breaking both v2 rules gives only v1 output."""
+def test_v2_rules_are_on_by_default_and_can_be_turned_off():
+    """The default runs rules 9 and 10; enable_v2_rules=False gives v1 output only."""
     at = datetime(2026, 10, 13, 10, 50)
     steps = change(
         clean(), "S-COMP-01", performed_at=at, verified_at=at + timedelta(minutes=65)
     )
     batch = matched(steps)
-    assert batch_findings(batch) == batch_findings(batch, RulesConfig())
-    assert batch_findings(batch) == ()
-    assert len(batch_findings(batch, V2_ON)) == 2
-    assert not set(V2_RULE_IDS) & set(RULE_IDS)
+    assert batch_findings(batch) == batch_findings(batch, V2_ON)
+    assert [f.rule_id for f in batch_findings(batch)] == list(V2_RULE_IDS)
+    assert batch_findings(batch, V2_OFF) == ()
+    assert set(V2_RULE_IDS) <= set(RULE_IDS)
 
 
 @pytest.mark.parametrize(
@@ -238,9 +239,10 @@ def test_config_refuses_a_bad_threshold(minutes, error):
 
 
 def test_engine_matches_the_generator_with_v2_rules_on(tmp_path):
-    """--batches 14 --catalog catalog: v2-on findings equal expected_findings.csv.
+    """--batches 14 --catalog catalog: review() equals expected_findings.csv.
 
-    With the default config, review() gives the same rows minus the v2 ones.
+    The default config (v2 on) gives every expected row; enable_v2_rules=False
+    gives the same rows minus the v2 ones.
     """
     out = tmp_path / "data"
     args = ["--batches", "14", "--catalog", str(REPO / "catalog"), "--out", str(out)]
@@ -252,23 +254,19 @@ def test_engine_matches_the_generator_with_v2_rules_on(tmp_path):
             for r in csv.DictReader(f)
         )
 
-    matched_run = match_batches(parse_files(master_path, batch_path))
-    assert matched_run.errors == ()
-    engine = Counter(
-        finding
-        for batch in matched_run.batches.values()
-        for finding in rated(batch_findings(batch, V2_ON))
-    )
-    assert engine == expected
-    assert sum(engine.values()) == 51
-    assert {rule for _, _, rule, _ in engine} >= set(V2_RULE_IDS)
+    def reviewed(config=None) -> Counter:
+        run = review(master_path, batch_path, *([config] if config else []))
+        assert (run.errors, run.rule_version) == ((), "1.1.0")
+        return Counter(
+            (f.batch_id, f.step_id, f.rule_id, f.step_severity)
+            for b in run.batches.values()
+            for f in b.findings
+        )
 
-    default = review(master_path, batch_path)
-    v1_only = Counter(
-        (f.batch_id, f.step_id, f.rule_id, f.step_severity)
-        for b in default.batches.values()
-        for f in b.findings
-    )
-    assert v1_only == Counter(
+    default = reviewed()
+    assert default == expected
+    assert sum(default.values()) == 51
+    assert {rule for _, _, rule, _ in default} >= set(V2_RULE_IDS)
+    assert reviewed(V2_OFF) == Counter(
         {key: n for key, n in expected.items() if key[2] not in V2_RULE_IDS}
     )

@@ -22,7 +22,7 @@ from pharma_batch_record_checker.review import (
     ReviewRun,
     review,
 )
-from pharma_batch_record_checker.rules import RULE_IDS
+from pharma_batch_record_checker.rules import V1_RULE_IDS
 from pharma_batch_record_checker.schema import BatchRow
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "approved_sample"
@@ -98,13 +98,13 @@ def test_sample_totals_and_run_category(result):
     assert len(engine(result)) == 14
     assert sum(len(flagged_steps(result, b)) for b in result.batches) == 13
     assert (result.result_category, result.complete) == ("Critical", True)
-    assert (result.errors, result.rule_version) == ((), "1.0.0")
+    assert (result.errors, result.rule_version) == ((), "1.1.0")
     assert list(result.batches) == ["B26-0412", "B26-0413", "P26-0201", "P26-0202"]
 
 
 def test_every_rule_code_is_covered(result):
     """All 8 approved rule codes appear at least once."""
-    assert {rule for _, _, rule, _ in engine(result)} == set(RULE_IDS)
+    assert {rule for _, _, rule, _ in engine(result)} == set(V1_RULE_IDS)
 
 
 # --- Per batch ------------------------------------------------------------------------

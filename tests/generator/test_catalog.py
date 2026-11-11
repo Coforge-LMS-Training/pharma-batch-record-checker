@@ -13,7 +13,7 @@ from pharma_batch_record_checker.generator.catalog import (
 )
 from pharma_batch_record_checker.generator.defects import BATCH_PLANS, Defect
 from pharma_batch_record_checker.generator.expected_findings import (
-    RULE_IDS,
+    V1_RULE_IDS,
     V2_RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import (
@@ -243,7 +243,7 @@ def test_catalog_oral_liquid_plan_covers_all_eight_rules():
     """oral_liquid_standard plants every agreed rule on the liquid template."""
     plan = catalog_plans()["oral_liquid_standard"]
     assert plan.template == "oral_liquid"
-    assert {d.rule_id for d in plan.defects} == set(RULE_IDS)
+    assert {d.rule_id for d in plan.defects} == set(V1_RULE_IDS)
 
 
 def test_mini_plan_loads(tmp_path):
@@ -399,7 +399,7 @@ def test_catalog_needs_review_plan_avoids_every_critical_trigger():
     assert not any(
         d.rule_id == "out_of_range" and d.step_id in critical for d in plan.defects
     )
-    assert {d.rule_id for d in plan.defects} == set(RULE_IDS) - {
+    assert {d.rule_id for d in plan.defects} == set(V1_RULE_IDS) - {
         "missing_second_check",
         "same_person",
     }

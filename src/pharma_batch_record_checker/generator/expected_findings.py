@@ -20,8 +20,7 @@ EXPECTED_FINDINGS_HEADER: tuple[str, ...] = (
     "severity",
 )
 
-# The eight confirmed rule_id spellings (rule_version 1.0.0). RULE_IDS is the
-# list the app's rules engine implements; a test keeps the two equal.
+# The eight v1 rule_id spellings (rule_version 1.0.0).
 RuleIdV1 = Literal[
     "out_of_range",
     "missing_reading",
@@ -32,16 +31,19 @@ RuleIdV1 = Literal[
     "verifier_before_performer",
     "unit_mismatch",
 ]
-RULE_IDS: tuple[str, ...] = get_args(RuleIdV1)
+V1_RULE_IDS: tuple[str, ...] = get_args(RuleIdV1)
 
-# Version-2 rules the generator can plant before the engine implements them:
-# rule 9, verified more than 60 minutes after performed; rule 10, performed
-# before the previous step present in the batch. Both are Needs Review alone.
+# The two version-2 rules (rule_version 1.1.0): rule 9, verified more than 60
+# minutes after performed; rule 10, performed before the previous step present
+# in the batch. Both are Needs Review alone.
 RuleIdV2 = Literal["late_verification", "performed_out_of_order"]
 V2_RULE_IDS: tuple[str, ...] = get_args(RuleIdV2)
 
+# All ten rules (rule_version 1.1.0). RULE_IDS is the list the app's rules
+# engine implements; a test keeps the two equal.
 RuleId = Literal[RuleIdV1, RuleIdV2]
-ALL_RULE_IDS: tuple[str, ...] = RULE_IDS + V2_RULE_IDS
+RULE_IDS: tuple[str, ...] = V1_RULE_IDS + V2_RULE_IDS
+ALL_RULE_IDS: tuple[str, ...] = RULE_IDS  # alias, kept for cli.py
 
 # The two agreed severity values. Severity is per step: every finding on a
 # step carries that step's severity.

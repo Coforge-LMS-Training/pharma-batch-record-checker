@@ -39,7 +39,7 @@ from pharma_batch_record_checker.generator.defects import (
 from pharma_batch_record_checker.generator.expected_findings import (
     ALL_RULE_IDS,
     EXPECTED_FINDINGS_HEADER,
-    RULE_IDS,
+    V1_RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import SYN500
 from pharma_batch_record_checker.schema import (
@@ -90,7 +90,7 @@ def test_defects_on_every_other_batch_per_product():
 def test_four_batches_cover_all_eight_rules():
     """Already at N=4 the dataset plants every agreed rule."""
     dataset = build_dataset(0, plan_batches(4))
-    assert {f.rule_id for f in dataset.findings} == set(RULE_IDS)
+    assert {f.rule_id for f in dataset.findings} == set(V1_RULE_IDS)
 
 
 def test_start_times_follow_back_to_back_schedule():
@@ -284,7 +284,7 @@ def test_summary_counts_findings_by_severity_steps_and_rule(tmp_path, capsys):
         f"on {steps} steps"
     ) in lines
     per_rule = ", ".join(
-        f"{rule} {sum(r['rule_id'] == rule for r in rows)}" for rule in RULE_IDS
+        f"{rule} {sum(r['rule_id'] == rule for r in rows)}" for rule in V1_RULE_IDS
     )
     assert (
         f"  rules: {per_rule} (not planted: late_verification, performed_out_of_order; no plan in use has: late_verification, performed_out_of_order)"
@@ -465,7 +465,7 @@ def test_product_without_defect_plan_gets_clean_batches(monkeypatch):
 def test_three_batches_are_the_minimum_for_all_eight_rules():
     """B26-0002 carries the full tablet defect plan, so N=3 already covers all 8."""
     assert {f.rule_id for f in build_dataset(0, plan_batches(3)).findings} == set(
-        RULE_IDS
+        V1_RULE_IDS
     )
     assert build_dataset(0, plan_batches(2)).findings == []
 
@@ -894,8 +894,8 @@ def planted_rules(lines, n):
 
 def test_batches_for_rules_with_the_built_in_lines():
     """B's 2nd batch (overall batch 3) already carries all 8 rules."""
-    assert batches_for_rules(PRODUCT_LINES) == (3, frozenset(RULE_IDS))
-    assert planted_rules(PRODUCT_LINES, 3) == set(RULE_IDS)
+    assert batches_for_rules(PRODUCT_LINES) == (3, frozenset(V1_RULE_IDS))
+    assert planted_rules(PRODUCT_LINES, 3) == set(V1_RULE_IDS)
     assert planted_rules(PRODUCT_LINES, 2) == set()
 
 
@@ -904,7 +904,7 @@ def test_batches_for_rules_with_the_catalog_lines():
     lines = PRODUCT_LINES + extra_lines(load_catalog(CATALOG).products)
     assert batches_for_rules(lines) == (14, frozenset(ALL_RULE_IDS))
     assert planted_rules(lines, 14) == set(ALL_RULE_IDS)
-    assert planted_rules(lines, 13) == set(RULE_IDS)
+    assert planted_rules(lines, 13) == set(V1_RULE_IDS)
     assert planted_rules(lines, 7) == set()
 
 

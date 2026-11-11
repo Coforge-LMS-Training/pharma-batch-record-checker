@@ -14,7 +14,7 @@ from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
     EXPECTED_FINDINGS_HEADER,
     NEEDS_REVIEW,
-    RULE_IDS,
+    V1_RULE_IDS,
     V2_RULE_IDS,
     DefectLog,
     ExpectedFinding,
@@ -35,7 +35,7 @@ def test_header_is_exact_four_columns():
 
 def test_rule_ids_are_the_eight_agreed_spellings():
     """The eight confirmed rule_id spellings (rule_version 1.0.0)."""
-    assert set(RULE_IDS) == {
+    assert set(V1_RULE_IDS) == {
         "out_of_range",
         "missing_reading",
         "missing_step",
@@ -45,7 +45,7 @@ def test_rule_ids_are_the_eight_agreed_spellings():
         "verifier_before_performer",
         "unit_mismatch",
     }
-    assert len(RULE_IDS) == 8
+    assert len(V1_RULE_IDS) == 8
 
 
 def test_severity_values():
@@ -431,11 +431,11 @@ FIRST = MASTER["S-DISP-01"]  # step_seq 1, critical
 
 
 def test_v1_rule_ids_are_unchanged_and_v2_are_separate():
-    """RULE_IDS stays the 8 v1 rules (the engine's list); V2_RULE_IDS adds two."""
-    assert len(RULE_IDS) == 8
+    """V1_RULE_IDS is the 8 v1 rules; V2_RULE_IDS adds two (RULE_IDS has all 10)."""
+    assert len(V1_RULE_IDS) == 8
     assert V2_RULE_IDS == ("late_verification", "performed_out_of_order")
-    assert ALL_RULE_IDS == RULE_IDS + V2_RULE_IDS
-    assert not set(RULE_IDS) & set(V2_RULE_IDS)
+    assert ALL_RULE_IDS == V1_RULE_IDS + V2_RULE_IDS
+    assert not set(V1_RULE_IDS) & set(V2_RULE_IDS)
 
 
 @pytest.mark.parametrize("rule_id", ["late_verification", "performed_out_of_order"])
