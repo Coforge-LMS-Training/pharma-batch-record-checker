@@ -13,6 +13,7 @@ from pharma_batch_record_checker.demo.view import (
     RESULT_GUIDE,
     RULE_GUIDE,
     group_findings,
+    guide_checks,
     overview,
     page_terms,
     process_strip,
@@ -27,6 +28,9 @@ from pharma_batch_record_checker.store.reads import (
     StoredMasterStep,
     StoredNote,
 )
+
+# The rule ids migration 0007 lets the store keep, beyond the engine's own.
+STORED_V2_RULE_IDS = ("late_verification", "performed_out_of_order")
 
 BASE = StoredFinding(
     finding_id="f-1",
@@ -68,10 +72,17 @@ def _only(findings: list[StoredFinding]):
 
 
 def test_every_rule_has_a_plain_title_and_meaning():
-    assert set(RULE_GUIDE) == set(RULE_IDS)
+    """RULE_GUIDE covers every id the store accepts: the engine's 8 plus v2."""
+    assert set(RULE_GUIDE) == set(RULE_IDS) | set(STORED_V2_RULE_IDS)
     for rule_id, guide in RULE_GUIDE.items():
         assert guide.title and guide.meaning, rule_id
         assert guide.title != rule_id
+
+
+def test_guide_checks_are_only_the_engine_rules_in_engine_order():
+    """The Guide lists the checks this engine runs, not every stored rule id."""
+    assert list(guide_checks()) == list(RULE_IDS)
+    assert all(guide_checks()[rule_id] is RULE_GUIDE[rule_id] for rule_id in RULE_IDS)
 
 
 def test_unknown_rule_falls_back_to_its_code():

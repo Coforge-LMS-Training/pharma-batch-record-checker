@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from pharma_batch_record_checker.rules import RULE_IDS
 from pharma_batch_record_checker.store.reads import (
     StoredBatchStep,
     StoredFinding,
@@ -49,8 +50,10 @@ class RuleGuide:
     fields: frozenset[str]
 
 
-# One entry per rule id in rule_version 1.0.0. The field names are
-# FindingView attributes; they mark the values a reader should look at first.
+# One entry per rule id the store accepts: the engine's RULE_IDS plus the v2
+# ids migration 0007 allows, so a stored v2 finding always has a plain title.
+# The field names are FindingView attributes; they mark the values a reader
+# should look at first.
 RULE_GUIDE: dict[str, RuleGuide] = {
     "out_of_range": RuleGuide(
         "Reading outside the allowed range",
@@ -96,6 +99,18 @@ RULE_GUIDE: dict[str, RuleGuide] = {
         "The recorded unit is not exactly the master's unit. Units are never "
         "converted, so the range is not checked.",
         frozenset({"recorded_unit", "expected_unit"}),
+    ),
+    "late_verification": RuleGuide(
+        "Checked long after it was done",
+        "The verification was recorded more than 60 minutes after the step was "
+        "performed. Exactly 60 minutes is fine.",
+        frozenset({"performed_at", "verified_at"}),
+    ),
+    "performed_out_of_order": RuleGuide(
+        "Done before the step before it",
+        "The step was performed earlier than the previous step in the master "
+        "record that the batch has. The same time is fine.",
+        frozenset({"performed_at"}),
     ),
 }
 
@@ -366,6 +381,11 @@ PAGE_TERMS: dict[str, tuple[str, ...]] = {
 def page_terms(page: str) -> tuple[Term, ...]:
     """The glossary entries shown at the foot of one page."""
     return tuple(GLOSSARY_BY_KEY[key] for key in PAGE_TERMS.get(page, ()))
+
+
+def guide_checks() -> dict[str, RuleGuide]:
+    """The checks this engine runs, in engine order, for the Guide page."""
+    return {rule_id: RULE_GUIDE[rule_id] for rule_id in RULE_IDS}
 
 
 def rule_guide(rule_id: str) -> RuleGuide:
