@@ -1,0 +1,30 @@
+# Defects for the tablet template that break only the version-2 timing rules:
+#   rule 9  late_verification:      verified more than 60 minutes after performed
+#                                   (exactly 60 passes); planted at 65 minutes.
+#   rule 10 performed_out_of_order: performed before the previous step present in
+#                                   the batch (the same time passes); planted
+#                                   20 minutes before it, with its verification
+#                                   moved by the same amount.
+# One defect per step, and neither rule is a critical trigger, so every finding
+# is Needs Review, even on the critical step S-COMP-01.
+# The app's rules engine is still rule_version 1.0.0: it will flag these once it
+# implements rules 9 and 10. Until then expected_findings.csv lists them and the
+# app doesn't.
+
+template = "tablet"
+
+[[defect]]
+step_id = "S-GRAN-03"
+rule_id = "late_verification"       # non-critical: a verifier is added
+
+[[defect]]
+step_id = "S-BLEND-02"
+rule_id = "performed_out_of_order"  # before S-BLEND-01
+
+[[defect]]
+step_id = "S-COMP-01"
+rule_id = "late_verification"       # critical step, still Needs Review
+
+[[defect]]
+step_id = "S-COAT-01"
+rule_id = "performed_out_of_order"  # before S-COMP-03

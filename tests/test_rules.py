@@ -234,7 +234,7 @@ def test_instruction_comment_does_not_change_the_result():
 def test_rule_ids_match_the_generator():
     """The engine's rule IDs are the generator's, in the same order."""
     assert rules.RULE_IDS == GENERATOR_RULE_IDS
-    assert rules.RULE_VERSION == "1.0.0"
+    assert rules.RULE_VERSION == "1.1.0"
 
 
 # --- PHA-63: missing step and missing performer --------------------------------------
@@ -521,10 +521,15 @@ def test_verification_before_performance_gives_one_finding():
 
 
 def test_detail_across_dates_shows_full_timestamps():
-    """Times on different dates are shown in full, so the order is clear."""
+    """Times on different dates are shown in full, so the order is clear.
+
+    Performed at 00:10 is also before S-GRAN-05 (10:00 that day), so rule 10
+    (on by default since rule_version 1.1.0) flags it too.
+    """
     change = blend(at("00:10", day=13), at("23:50", day=12))
     assert details_after(clean_tablet_batch(), "S-BLEND-01", **change) == [
-        "Verified 2026-10-12T23:50, performed 2026-10-13T00:10"
+        "Verified 2026-10-12T23:50, performed 2026-10-13T00:10",
+        "Performed 00:10, before S-GRAN-05 (performed 10:00)",
     ]
 
 

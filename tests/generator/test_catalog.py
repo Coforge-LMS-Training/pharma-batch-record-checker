@@ -12,7 +12,10 @@ from pharma_batch_record_checker.generator.catalog import (
     load_templates,
 )
 from pharma_batch_record_checker.generator.defects import BATCH_PLANS, Defect
-from pharma_batch_record_checker.generator.expected_findings import RULE_IDS
+from pharma_batch_record_checker.generator.expected_findings import (
+    V1_RULE_IDS,
+    V2_RULE_IDS,
+)
 from pharma_batch_record_checker.generator.masters import (
     CAPSULE_PROCESS,
     PLC250,
@@ -240,7 +243,7 @@ def test_catalog_oral_liquid_plan_covers_all_eight_rules():
     """oral_liquid_standard plants every agreed rule on the liquid template."""
     plan = catalog_plans()["oral_liquid_standard"]
     assert plan.template == "oral_liquid"
-    assert {d.rule_id for d in plan.defects} == set(RULE_IDS)
+    assert {d.rule_id for d in plan.defects} == set(V1_RULE_IDS)
 
 
 def test_mini_plan_loads(tmp_path):
@@ -355,7 +358,7 @@ def test_catalog_products_load_in_file_name_order():
         )
         for p, template in zip(
             catalog.products,
-            ["oral_liquid", "tablet", "capsule", "capsule"],
+            ["oral_liquid", "tablet", "capsule", "capsule", "tablet"],
             strict=True,
         )
     ]
@@ -364,7 +367,20 @@ def test_catalog_products_load_in_file_name_order():
         ("MBR-FTP040", "F", True, catalog.plans["tablet_standard"]),
         ("MBR-MKZ075", "M", True, None),
         ("MBR-NMX010", "N", True, catalog.plans["capsule_needs_review"]),
+        ("MBR-TDX020", "T", True, catalog.plans["tablet_timing"]),
     ]
+
+
+def test_catalog_timing_plan_plants_only_the_v2_rules():
+    """tablet_timing plants only rules 9 and 10, one defect per step.
+
+    Both are Needs Review alone, so the batch needs a look but isn't Critical.
+    """
+    plan = catalog_plans()["tablet_timing"]
+    steps = [d.step_id for d in plan.defects]
+    assert plan.template == "tablet"
+    assert len(steps) == len(set(steps))
+    assert {d.rule_id for d in plan.defects} == set(V2_RULE_IDS)
 
 
 def test_catalog_needs_review_plan_avoids_every_critical_trigger():
@@ -383,7 +399,7 @@ def test_catalog_needs_review_plan_avoids_every_critical_trigger():
     assert not any(
         d.rule_id == "out_of_range" and d.step_id in critical for d in plan.defects
     )
-    assert {d.rule_id for d in plan.defects} == set(RULE_IDS) - {
+    assert {d.rule_id for d in plan.defects} == set(V1_RULE_IDS) - {
         "missing_second_check",
         "same_person",
     }

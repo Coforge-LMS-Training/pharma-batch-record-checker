@@ -50,10 +50,8 @@ class RuleGuide:
     fields: frozenset[str]
 
 
-# One entry per rule id the store accepts: the engine's RULE_IDS plus the v2
-# ids migration 0007 allows, so a stored v2 finding always has a plain title.
-# The field names are FindingView attributes; they mark the values a reader
-# should look at first.
+# One entry per rule id in rule_version 1.1.0. The field names are
+# FindingView attributes; they mark the values a reader should look at first.
 RULE_GUIDE: dict[str, RuleGuide] = {
     "out_of_range": RuleGuide(
         "Reading outside the allowed range",
@@ -263,7 +261,7 @@ GLOSSARY: tuple[Term, ...] = (
     Term(
         "rule-version",
         "Rule version",
-        "Which version of the eight checks produced a run, currently 1.0.0, so "
+        "Which version of the ten checks produced a run, currently 1.1.0, so "
         "an old result can always be explained.",
     ),
     Term(
@@ -298,7 +296,7 @@ FAQ: tuple[tuple[str, str], ...] = (
     (
         "What does this site do?",
         (
-            "It compares each batch record with its master record using eight "
+            "It compares each batch record with its master record using ten "
             "checks, and lists every place a person should look. It does not "
             "decide anything on its own."
         ),

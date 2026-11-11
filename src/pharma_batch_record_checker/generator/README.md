@@ -16,7 +16,7 @@ wrote 4 batches, 20 expected findings to data
     B  MBR-SYN500 v3  Synthetol 500 mg film-coated tablets  2 batches, 1 defective
     P  MBR-PLC250 v1  Placeprol 250 mg hard capsules        2 batches, 1 defective
   findings: 10 Critical, 10 Needs Review, on 18 steps
-  rules: out_of_range 5, missing_reading 1, missing_step 2, missing_performer 3, missing_second_check 2, same_person 2, verifier_before_performer 2, unit_mismatch 3 (all 8 planted)
+  rules: out_of_range 5, missing_reading 1, missing_step 2, missing_performer 3, missing_second_check 2, same_person 2, verifier_before_performer 2, unit_mismatch 3 (not planted: late_verification, performed_out_of_order; no plan in use has: late_verification, performed_out_of_order)
   time span: 2026-10-12T07:00 to 2026-10-13T00:57
   files: master_record.csv, batch_record.csv, expected_findings.csv
 ```
@@ -103,7 +103,7 @@ B26-0001,MBR-SYN500,3,S-DISP-02,29.85,kg,OP-101,2026-10-12T07:30,,,
 
 Lines without a defect plan only get clean batches.
 
-**How many batches you need.** With *k* lines, line *j* (counting from 0) has its first defective batch at overall batch *k + j + 1*. With only B and P, 3 batches plant all 8 rules, because B26-0002 carries the full tablet plan. With a catalog, the summary works it out for you:
+**How many batches you need.** With *k* lines, line *j* (counting from 0) has its first defective batch at overall batch *k + j + 1*. With only B and P, 3 batches plant all 8 v1 rules, because B26-0002 carries the full tablet plan. The two v2 rules come only from catalog plans (Tardexa's `tablet_timing`), so the default run says they weren't planted. With a catalog, the summary works out how many batches plant everything:
 
 ```
 findings: none (a line's defects start at its 2nd batch; use --batches 4 or more)
@@ -113,15 +113,24 @@ findings: none (no product line has a defect plan)
 
 **Clean readings** fall within the limits, at the limits' precision. Where the limits allow, each clean batch includes one reading exactly at a minimum and one exactly at a maximum (limits are inclusive, so these must pass). Each batch's readings come from its own seed, derived from `--seed` and the batch ID.
 
-## The 8 rules and severity
+## Rules and severity
 
-Defect plans use these rule IDs (`rule_version` 1.0.0): `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`, `missing_second_check` (critical steps only), `same_person` (critical steps only), `verifier_before_performer`, `unit_mismatch`.
+Defect plans can use the 8 rules of `rule_version` 1.0.0: `out_of_range`, `missing_reading`, `missing_step`, `missing_performer`, `missing_second_check` (critical steps only), `same_person` (critical steps only), `verifier_before_performer` and `unit_mismatch`.
+
+They can also use two **version-2 rules**. The generator plants these before the app's rules engine checks them:
+
+| Rule | Flags when | Passes | Skipped | Planted as |
+|---|---|---|---|---|
+| `late_verification` (rule 9) | `verified_at` is more than 60 minutes after `performed_at` | exactly 60 minutes or less | either time is blank | verified 65 minutes after; a verifier is added on non-critical steps |
+| `performed_out_of_order` (rule 10) | `performed_at` is earlier than the previous master step (by `step_seq`) present in the batch | the same time or later | either time is blank, or it's the batch's first step | performed 20 minutes before that step, with its verification moved by the same amount |
+
+In code, the v1 rules are `RULE_IDS` (the engine's list, kept equal by a test), the v2 rules are `V2_RULE_IDS`, and `ALL_RULE_IDS` is both. **The engine is still v1**: until it implements rules 9 and 10, the app won't flag v2 findings, so `expected_findings.csv` lists rows the app doesn't. Clean batches never break the v2 rules: steps are 30 minutes apart and verified 5–20 minutes after.
 
 A step's findings are **Critical** if:
 - the step has 2 or more findings, or
 - it's a critical step that is out of range, has no second check, or was checked by the same person.
 
-Otherwise they're **Needs Review**. Combinations that couldn't all fire together are refused when the defects are planted.
+Otherwise they're **Needs Review**. Both v2 rules are Needs Review on their own, even on a critical step. Combinations that couldn't all fire together are refused when the defects are planted, for example `late_verification` with `missing_second_check`, or `performed_out_of_order` on the first step.
 
 ## Exit codes and errors
 

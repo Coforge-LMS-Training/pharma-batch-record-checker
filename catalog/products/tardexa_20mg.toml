@@ -1,0 +1,30 @@
+# Invented product: a tablet whose defective batches break only the
+# version-2 timing rules (see defect_plans/tablet_timing.toml).
+
+master_record_id = "MBR-TDX020"
+master_version   = "1"
+product_name     = "Tardexa 20 mg film-coated tablets"
+batch_size       = "400000"
+batch_size_unit  = "tablets"
+excipient        = "microcrystalline cellulose"
+template         = "tablet"
+id_letter        = "T"
+defect_plan      = "tablet_timing"
+
+# step_id = [min, max] for every measured step; units come from the template.
+[limits]
+"S-DISP-01"  = ["7.96", "8.04"]     # API net weight, kg
+"S-DISP-02"  = ["11.94", "12.06"]   # excipient net weight, kg
+"S-GRAN-01"  = ["5.0", "6.0"]       # water added, L
+"S-GRAN-02"  = ["140", "190"]       # impeller speed, rpm
+"S-GRAN-03"  = ["4", "6"]           # granulation time, min
+"S-GRAN-04"  = ["50", "60"]         # inlet air temperature, degC
+"S-GRAN-05"  = ["1.0", "2.0"]       # loss on drying, %
+"S-BLEND-01" = ["8", "12"]          # blend time, min
+"S-BLEND-02" = ["10", "14"]         # blender speed, rpm
+"S-COMP-01"  = ["145", "155"]       # tablet weight, mg
+"S-COMP-02"  = ["5.0", "8.0"]       # tablet hardness, kP
+"S-COMP-03"  = ["3.0", "3.4"]       # tablet thickness, mm
+"S-COAT-01"  = ["50", "60"]         # inlet air temperature, degC
+"S-COAT-02"  = ["2.0", "3.0"]       # coating weight gain, %
+"S-PACK-02"  = ["99.5", "100.5"]    # label count reconciliation, %

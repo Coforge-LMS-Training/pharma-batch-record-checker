@@ -18,7 +18,10 @@ from pharma_batch_record_checker.generator.dataset_io import (
     EXPECTED_FILE,
     MASTER_FILE,
 )
-from pharma_batch_record_checker.generator.expected_findings import CRITICAL, RULE_IDS
+from pharma_batch_record_checker.generator.expected_findings import (
+    CRITICAL,
+    V1_RULE_IDS,
+)
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 from tests.generator.rule_oracle import rule_violations
 
@@ -95,7 +98,7 @@ def test_cli_output_clean_batches_unflagged(cli_output):
 def test_cli_output_has_all_eight_rules_and_multi_finding_critical(cli_output):
     """All 8 rules are planted, and every step with 2+ findings is Critical."""
     _, _, expected = cli_output
-    assert {e["rule_id"] for e in expected} == set(RULE_IDS)
+    assert {e["rule_id"] for e in expected} == set(V1_RULE_IDS)
     per_step = Counter((e["batch_id"], e["step_id"]) for e in expected)
     multi = {key for key, n in per_step.items() if n >= 2}
     assert multi

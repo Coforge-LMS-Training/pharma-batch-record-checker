@@ -1,4 +1,4 @@
-"""Run a review: parse -> match -> rules -> severity (rule_version 1.0.0).
+"""Run a review: parse -> match -> rules -> severity (rule_version 1.1.0).
 
 Severity is decided per step, from the findings the rules already detected.
 It never adds a finding: "two problems on one step" is not a rule, it only
@@ -24,7 +24,13 @@ from typing import Literal, get_args
 from pharma_batch_record_checker.matching import MatchedBatch, MatchError, match_batches
 from pharma_batch_record_checker.parser import ParseError, Source, parse_files
 from pharma_batch_record_checker.records import MasterVersion
-from pharma_batch_record_checker.rules import RULE_VERSION, Finding, batch_findings
+from pharma_batch_record_checker.rules import (
+    DEFAULT_RULES_CONFIG,
+    RULE_VERSION,
+    Finding,
+    RulesConfig,
+    batch_findings,
+)
 
 # The two agreed step severities, and the three agreed result categories.
 Severity = Literal["Critical", "Needs Review"]
@@ -78,11 +84,18 @@ class ReviewRun:
     complete: bool
 
 
-def review(master_path: Source, batch_path: Source) -> ReviewRun:
-    """Review every batch in batch_path against the masters in master_path."""
+def review(
+    master_path: Source,
+    batch_path: Source,
+    config: RulesConfig = DEFAULT_RULES_CONFIG,
+) -> ReviewRun:
+    """Review every batch in batch_path against the masters in master_path.
+
+    config sets the rule options (DEFAULT_RULES_CONFIG runs all 10 rules).
+    """
     parsed = parse_files(master_path, batch_path)
     matched = match_batches(parsed)
-    batches = {b: review_batch(m) for b, m in matched.batches.items()}
+    batches = {b: review_batch(m, config) for b, m in matched.batches.items()}
     category: ResultCategory | None = _worst(
         b.result_category for b in batches.values()
     )
@@ -98,9 +111,11 @@ def review(master_path: Source, batch_path: Source) -> ReviewRun:
     )
 
 
-def review_batch(batch: MatchedBatch) -> BatchReview:
+def review_batch(
+    batch: MatchedBatch, config: RulesConfig = DEFAULT_RULES_CONFIG
+) -> BatchReview:
     """Rate each step's findings and order them by step_seq, then rule_id."""
-    found = batch_findings(batch)
+    found = batch_findings(batch, config)
     by_step: dict[str, list[Finding]] = {}
     for finding in found:
         by_step.setdefault(finding.step_id, []).append(finding)
