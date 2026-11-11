@@ -7,14 +7,23 @@ and the checks. POST a note calls insert_finding_note and redirects back. The
 CSV route returns export_batch_csv. There is no login and no release action.
 """
 
+import os
 import uuid
+from dataclasses import replace
 from datetime import date
 from functools import wraps
 from typing import Any
-from urllib.parse import quote
 
 import psycopg
-from flask import Flask, Response, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    Response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from psycopg.rows import dict_row
 
 from pharma_batch_record_checker.demo.view import (
     FAQ,
@@ -22,6 +31,8 @@ from pharma_batch_record_checker.demo.view import (
     NEEDS_A_LOOK,
     RESULT_GUIDE,
     RULE_GUIDE,
+    ChainStatus,
+    audit_entry,
     format_day,
     format_decimal,
     format_store_time,
@@ -31,6 +42,7 @@ from pharma_batch_record_checker.demo.view import (
     process_strip,
     result_class,
     status_slug,
+    step_results,
 )
 from pharma_batch_record_checker.store.connection import connect
 from pharma_batch_record_checker.store.errors import (
@@ -38,8 +50,10 @@ from pharma_batch_record_checker.store.errors import (
     FindingNotFound,
     MasterNotFound,
 )
+from pharma_batch_record_checker.store.hashchain import master_entity_id, verify_chain
 from pharma_batch_record_checker.store.notes import insert_finding_note
 from pharma_batch_record_checker.store.reads import (
+    EXPORT_COLUMNS,
     BatchSummary,
     export_batch_csv,
     get_batch,
@@ -50,6 +64,11 @@ from pharma_batch_record_checker.store.reads import (
     list_runs,
     list_runs_on,
 )
+
+# Footer branding. TODO(owner): confirm the team name and set CONTACT_EMAIL
+# in .env; until then the placeholder below is shown.
+BRAND = "Momentum Blue FDEs"
+CONTACT_EMAIL_PLACEHOLDER = "contact@momentumblue.example"
 
 # ?status= values on the batch list. "attention" is Critical or Needs Review.
 STATUS_FILTERS: dict[str, frozenset[str]] = {
@@ -73,7 +92,17 @@ def create_app() -> Flask:
         page_terms=page_terms,
         format_store_time=format_store_time,
         format_day=format_day,
+        brand=BRAND,
+        current_year=date.today().year,
     )
+
+    @app.context_processor
+    def _site() -> dict[str, Any]:
+        # Read per request so a changed .env needs only a restart, not a rebuild.
+        return {
+            "contact_email": os.environ.get("CONTACT_EMAIL", "").strip()
+            or CONTACT_EMAIL_PLACEHOLDER,
+        }
 
     @app.after_request
     def _nosniff(response: Response) -> Response:
@@ -186,6 +215,15 @@ def create_app() -> Flask:
         response = Response(body, content_type="text/csv; charset=utf-8")
         response.headers["Content-Disposition"] = (
             f'attachment; filename="{batch_id}-history.csv"'
+        )
+        return response
+
+    @app.get("/reports/all-batches.csv")
+    @stored
+    def export_all_csv() -> Response:
+        response = Response(all_batches_csv(), content_type="text/csv; charset=utf-8")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{ALL_BATCHES_FILENAME}"'
         )
         return response
 
@@ -319,17 +357,92 @@ def _batch_id_for_finding(finding_id: str) -> str | None:
     return row[0]
 
 
-def _email_link(batch_id: str) -> str:
-    """A mailto: link carrying the CSV's address. Mail links cannot attach files."""
-    csv_url = url_for("export_csv", batch_id=batch_id, _external=True)
-    page_url = url_for("batch_page", batch_id=batch_id, _external=True)
-    subject = f"Batch {batch_id} review history (synthetic data)"
-    body = (
-        f"Review history for batch {batch_id}.\n\n"
-        f"Download the CSV: {csv_url}\n"
-        f"Open the review: {page_url}\n"
+# verify_chain re-checks every stored event, so it runs on each page view only
+# while the chain is small; above this, the page offers a button instead.
+AUTO_VERIFY_LIMIT = 2000
+
+
+def _audit_trail(batch_id: str, master_id: str, master_version: str) -> list[Any]:
+    """This batch's hash-chain events, oldest first, described for a reader.
+
+    The batch's master import, the batch import, its review runs, and the
+    notes on its findings. Read-only: audit_event is SELECT for the app role.
+    """
+    with connect() as conn:
+        conn.row_factory = dict_row
+        rows = conn.execute(
+            """
+            SELECT e.event_seq, e.event_type, e.entity_id, e.event_hash,
+                   e.prev_event_hash, e.created_at,
+                   r.rule_version, r.result_category,
+                   (SELECT count(*) FROM finding rf WHERE rf.run_id = r.run_id)
+                       AS run_findings,
+                   n.reviewer_name, n.note_text, f.finding_id, f.step_id, f.rule_id,
+                   (SELECT count(*) FROM batch_step bs WHERE bs.batch_id = %(batch)s)
+                       AS batch_steps
+            FROM audit_event e
+            LEFT JOIN review_run r
+                   ON e.event_type = 'review_run' AND r.run_id::text = e.entity_id
+            LEFT JOIN finding_note n
+                   ON e.event_type = 'finding_note' AND n.note_id::text = e.entity_id
+            LEFT JOIN finding f ON f.finding_id = n.finding_id
+            WHERE (e.event_type = 'master_import' AND e.entity_id = %(master)s)
+               OR (e.event_type = 'batch_import' AND e.entity_id = %(batch)s)
+               OR r.batch_id = %(batch)s
+               OR f.batch_id = %(batch)s
+            ORDER BY e.event_seq
+            """,
+            {"batch": batch_id, "master": master_entity_id(master_id, master_version)},
+        ).fetchall()
+    label = f"{master_id} v{master_version}"
+    entries = [audit_entry({**row, "master_label": label}) for row in rows]
+    runs = [i for i, entry in enumerate(entries) if entry.kind == "review_run"]
+    if runs:
+        entries[runs[-1]] = replace(entries[runs[-1]], latest=True)
+    return entries
+
+
+def _chain_status(force: bool) -> ChainStatus:
+    """Run verify_chain when asked, or when the chain is small enough."""
+    with connect() as conn:
+        (events,) = conn.execute("SELECT count(*) FROM audit_event").fetchone()
+    if not force and events > AUTO_VERIFY_LIMIT:
+        return ChainStatus(checked=False, ok=False, events=events)
+    failure = verify_chain()
+    if failure is None:
+        return ChainStatus(checked=True, ok=True, events=events)
+    return ChainStatus(
+        checked=True,
+        ok=False,
+        events=events,
+        failed_seq=failure.event_seq,
+        failed_check=failure.check,
     )
-    return f"mailto:?subject={quote(subject)}&body={quote(body)}"
+
+
+ALL_BATCHES_FILENAME = "all-batches-report.csv"
+
+
+def all_batches_csv() -> str:
+    """Every stored batch's auditor CSV in one file, under one header.
+
+    Built from export_batch_csv, so its columns and rows are exactly the
+    per-batch export's, batch after batch in batch_id order.
+    """
+    parts = [export_batch_csv(batch.batch_id) for batch in list_batches()]
+    if not parts:
+        return ",".join(EXPORT_COLUMNS) + "\r\n"
+    header, *_ = parts[0].split("\r\n", 1)
+    rows = [part.split("\r\n", 1)[1] for part in parts]
+    return header + "\r\n" + "".join(rows)
+
+
+def _batch_exists(batch_id: str) -> bool:
+    try:
+        get_batch(batch_id)
+    except BatchNotFound:
+        return False
+    return True
 
 
 def _render_batch(
@@ -357,9 +470,11 @@ def _render_batch(
             finding.finding_id: list_notes(finding.finding_id) for finding in findings
         }
         groups = group_findings(findings, notes)
-    strip = (
-        () if master is None or latest is None else process_strip(master.steps, groups)
-    )
+    results: tuple[Any, ...] = groups
+    strip: tuple[Any, ...] = ()
+    if master is not None and latest is not None:
+        results = step_results(master.steps, batch.steps, groups)
+        strip = process_strip(master.steps, results)
     return render_template(
         "batch.html",
         nav="batches",
@@ -369,9 +484,11 @@ def _render_batch(
         runs=runs,
         latest=latest,
         groups=groups,
+        results=results,
         summary=overview(groups),
         strip=strip,
-        email_link=_email_link(batch_id),
+        trail=_audit_trail(batch_id, batch.master_record_id, batch.master_version),
+        chain=_chain_status(force=request.args.get("verify") == "1"),
         batch_size="" if master is None else format_decimal(master.batch_size),
         note_error=note_error,
         note_finding_id=note_finding_id,

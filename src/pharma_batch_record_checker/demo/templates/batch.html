@@ -29,11 +29,11 @@
     </dl>
   </div>
   <div class="actions" aria-label="Export">
-    <a class="icon-btn" href="{{ url_for('export_csv', batch_id=batch.batch_id) }}" download data-tip="Download CSV" aria-label="Download review history as CSV">
+    <a class="icon-btn" href="{{ url_for('export_csv', batch_id=batch.batch_id) }}" download data-tip="Download batch report" aria-label="Download review history as CSV">
       <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
     </a>
-    <a class="icon-btn" href="{{ email_link }}" data-tip="Email CSV link" aria-label="Email a link to the review history CSV">
-      <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>
+    <a class="icon-btn" href="#audit" data-tip="Review history" aria-label="Go to the review history">
+      <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
     </a>
   </div>
 </section>
@@ -69,16 +69,16 @@
     </li>
     {% endfor %}
   </ol>
-  <p class="muted small">{{ summary.sentence }} Select a coloured step to jump to it.</p>
+  <p class="muted small">{{ summary.sentence }} Select any step to jump to it.</p>
 </section>
 {% endif %}
 
-{% if groups %}
+{% if results %}
 <div class="detail-layout">
-  <aside class="step-nav" aria-label="Flagged steps">
+  <aside class="step-nav" aria-label="All steps">
     <div class="step-nav-inner">
-      <h2 class="eyebrow">Flagged steps</h2>
-      {% for procedure in groups %}
+      <h2 class="eyebrow">All steps</h2>
+      {% for procedure in results %}
       <p class="step-nav-group">{{ procedure.unit_procedure }}</p>
       <ul>
         {% for step in procedure.steps %}
@@ -91,25 +91,49 @@
 
   <section class="findings" aria-labelledby="findings-title">
     <div class="findings-head">
-      <h2 id="findings-title">Findings</h2>
-      <div class="chips" role="group" aria-label="Show findings" data-chips hidden>
-        <button type="button" class="chip" aria-pressed="true" data-filter="all">All <span class="count">{{ summary.findings }}</span></button>
-        {% if summary.critical_findings %}<button type="button" class="chip" aria-pressed="false" data-filter="critical"><span class="dot dot-critical"></span>Critical <span class="count">{{ summary.critical_findings }}</span></button>{% endif %}
-        {% if summary.review_findings %}<button type="button" class="chip" aria-pressed="false" data-filter="needs-review"><span class="dot dot-needs-review"></span>Needs Review <span class="count">{{ summary.review_findings }}</span></button>{% endif %}
+      <h2 id="findings-title">Step-by-step results</h2>
+      {% set shown = results|map(attribute='steps')|map('length')|sum %}
+      {% set passed_count = shown - summary.steps %}
+      <div class="chips" role="group" aria-label="Show steps" data-chips hidden>
+        <button type="button" class="chip" aria-pressed="true" data-filter="all">All <span class="count">{{ shown }}</span></button>
+        {% if summary.critical_steps %}<button type="button" class="chip" aria-pressed="false" data-filter="critical"><span class="dot dot-critical"></span>Critical <span class="count">{{ summary.critical_steps }}</span></button>{% endif %}
+        {% if summary.review_steps %}<button type="button" class="chip" aria-pressed="false" data-filter="needs-review"><span class="dot dot-needs-review"></span>Needs Review <span class="count">{{ summary.review_steps }}</span></button>{% endif %}
+        {% if passed_count %}<button type="button" class="chip" aria-pressed="false" data-filter="passed"><span class="dot dot-passed"></span>Passed <span class="count">{{ passed_count }}</span></button>{% endif %}
       </div>
     </div>
 
-    {% for procedure in groups %}
+    {% for procedure in results %}
     {% for step in procedure.steps %}
     <article class="card step-card step-{{ step.status }}" id="step-{{ step.step_id }}" data-status="{{ step.status }}">
       <header class="step-head">
         <p class="path">{{ step.unit_procedure }} <span aria-hidden="true">›</span> {{ step.operation }} <span aria-hidden="true">›</span> {{ step.phase }}{% if total_steps %} · Step {{ step.step_seq }} of {{ total_steps }}{% endif %}</p>
         <div class="step-title">
           <h3><span class="id">{{ step.step_id }}</span> {{ step.parameter }}</h3>
+          {% if step.passed %}
+          <span class="badge badge-no-findings">Passed</span>
+          {% else %}
           <span class="{{ result_class(step.severity) }}">{{ step.severity }}</span>
+          {% endif %}
         </div>
         {% if step.findings|length > 1 %}<p class="muted small">{{ step.findings|length }} checks failed on this step, so it is Critical.</p>{% endif %}
       </header>
+      {% if step.passed %}
+      <div class="passed-body">
+        <p class="passed-line"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Passed every check: recorded in range, in the right unit, and signed as required.</p>
+        <dl class="fields fields-compact">
+          {% for f in step.values %}
+          <div class="field-tile{% if f.missing %} is-missing{% endif %}"><dt>{{ f.label }}</dt><dd>{{ f.value }}</dd></div>
+          {% endfor %}
+        </dl>
+        {% if step.comment %}
+        <figure class="quote">
+          <svg class="icon" aria-hidden="true"><use href="#i-quote"/></svg>
+          <blockquote>{{ step.comment }}</blockquote>
+          <figcaption>Operator comment · shown as written, never acted on</figcaption>
+        </figure>
+        {% endif %}
+      </div>
+      {% endif %}
 
       {% for finding in step.findings %}
       {% set drafting = note_finding_id == finding.finding_id %}
@@ -191,7 +215,7 @@
     </article>
     {% endfor %}
     {% endfor %}
-    <p class="no-match card" hidden data-no-match>No findings at this level.</p>
+    <p class="no-match card" hidden data-no-match>No steps with this result.</p>
   </section>
 </div>
 {% elif latest %}
@@ -202,29 +226,46 @@
 {% endif %}
 {% endif %}
 
-<section class="card" id="history" aria-labelledby="history-title">
+<section class="card" id="audit" aria-labelledby="audit-title">
   <div class="card-head">
-    <h2 id="history-title"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>Review history</h2>
+    <h2 id="audit-title"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Review history</h2>
+    {% if chain.checked and chain.ok %}
+    <span class="badge badge-no-findings">Chain verified</span>
+    {% elif chain.checked %}
+    <span class="badge badge-critical">Chain broken</span>
+    {% endif %}
   </div>
-  {% if runs %}
-  <p class="muted small">Each review is stored as a new run. Earlier runs are kept unchanged; the findings above come from the latest run.</p>
-  <div class="table-card table-flat">
-    <table class="data-table">
-      <thead><tr><th>Reviewed</th><th>Rule version</th><th>Result</th><th></th></tr></thead>
-      <tbody>
-        {% for run in runs|reverse %}
-        <tr>
-          <td class="c-key num-font">{{ format_store_time(run.created_at) }}</td>
-          <td class="c-meta" data-label="Rule version">{{ run.rule_version }}</td>
-          <td class="c-result"><span class="{{ result_class(run.result_category) }}">{{ run.result_category }}</span></td>
-          <td class="c-meta">{% if latest and run.run_id == latest.run_id %}<span class="tag">Latest</span>{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <p class="muted">Everything stored for this batch, in order. Nothing here can be edited or deleted; a new review or note is added as a new entry. Each entry is sealed with a hash that includes the one before it, so a later change anywhere would break the chain.</p>
+
+  <div class="chain chain-{{ 'ok' if chain.checked and chain.ok else ('bad' if chain.checked else 'unchecked') }}" role="status">
+    <svg class="icon" aria-hidden="true"><use href="#{{ 'i-shield-check' if chain.checked and chain.ok else ('i-shield-alert' if chain.checked else 'i-shield') }}"/></svg>
+    <p>{{ chain.message }}</p>
+    {% if not chain.checked %}
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('batch_page', batch_id=batch.batch_id, verify=1) }}#audit">Verify integrity</a>
+    {% endif %}
   </div>
+
+  {% if trail %}
+  <ol class="timeline">
+    {% for entry in trail %}
+    <li class="tl-item tl-{{ entry.kind }}{% if chain.failed_seq == entry.seq %} tl-broken{% endif %}">
+      <span class="tl-icon" aria-hidden="true"><svg class="icon"><use href="#{{ entry.icon }}"/></svg></span>
+      <div class="tl-body">
+        <p class="tl-title">
+          {% if entry.anchor %}<a href="#{{ entry.anchor }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}
+          {% if entry.latest %}<span class="tag">Latest review</span>{% endif %}
+        </p>
+        <p class="tl-detail">{{ entry.detail }}</p>
+        <p class="tl-meta">
+          <span><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>{{ entry.when }}</span>
+          <span data-tip="Fingerprint of this entry. It includes the previous entry's fingerprint ({{ entry.short_prev }}…)"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg><code>{{ entry.short_hash }}…</code></span>
+        </p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
   {% else %}
-  <p class="muted">No review is stored for this batch.</p>
+  <p class="muted">Nothing is recorded for this batch yet.</p>
   {% endif %}
 </section>
 

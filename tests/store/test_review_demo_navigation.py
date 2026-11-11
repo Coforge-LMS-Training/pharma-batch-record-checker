@@ -6,7 +6,6 @@ Synthetic approved sample only. These tests skip when DATABASE_URL is unset.
 import os
 import re
 from pathlib import Path
-from urllib.parse import unquote
 
 import pytest
 
@@ -125,8 +124,8 @@ def test_export_and_email_are_icon_buttons(client):
     html = _html(client, "/batches/B26-0413")
     assert 'aria-label="Download review history as CSV"' in html
     assert 'href="/batches/B26-0413/export.csv" download' in html
-    email = re.search(r'href="(mailto:[^"]+)"', html).group(1)
-    assert "/batches/B26-0413/export.csv" in unquote(email)
+    main = _main(html)
+    assert "/email" not in main and "mailto:" not in main
 
 
 def test_strip_and_findings_cover_every_flagged_step(client):
@@ -151,7 +150,7 @@ def test_missing_values_are_called_out(client):
     html = _html(client, "/batches/B26-0413")
     assert "Verified by and Verified at were left empty" in html
     assert "no row at all" in html
-    assert "Not recorded" in html
+    assert "Not required" in html  # no verifier needed on non-critical steps
 
 
 def test_glossary_help_on_pages_and_full_guide(client):
@@ -207,3 +206,144 @@ def test_unknown_batch_is_a_friendly_404(client):
     response = client.get("/batches/NOPE-0001")
     assert response.status_code == 404
     assert "No batch NOPE-0001 is stored." in response.get_data(as_text=True)
+
+
+def _audit(html: str) -> str:
+    return html.split('id="audit"', 1)[1].split("</section>", 1)[0]
+
+
+def _titles(html: str) -> list[str]:
+    raw = re.findall(r'<p class="tl-title">(.*?)</p>', _audit(html), re.DOTALL)
+    return [" ".join(re.sub(r"<[^>]+>", " ", t).split()) for t in raw]
+
+
+def test_audit_trail_lists_this_batchs_events_in_order(client):
+    trail = _titles(_html(client, "/batches/B26-0413"))
+    assert trail == [
+        "Master record stored",
+        "Batch record stored",
+        "Reviewed: Critical Latest review",
+    ]
+    html = _audit(_html(client, "/batches/B26-0413"))
+    assert "MBR-SYN500 v3" in html
+    assert "15 executed steps recorded by operators." in html
+    assert "Rule version 1.0.0 found 10 findings." in html
+    # Another batch's events stay off this page.
+    assert "P26-0202" not in html
+
+
+def test_audit_trail_verifies_the_chain(client):
+    html = _audit(_html(client, "/batches/B26-0413"))
+    assert "Chain verified" in html
+    assert "all 10 recorded events still match" in html
+
+
+def test_a_note_appears_in_the_audit_trail(client):
+    (run,) = list_runs("B26-0413")
+    finding = list_findings(run.run_id)[0]
+    client.post(
+        f"/findings/{finding.finding_id}/notes",
+        data={"reviewer_name": "Reviewer C", "note_text": "Verifier asked."},
+    )
+    html = _html(client, "/batches/B26-0413")
+    assert _titles(html)[-1] == "Note added by Reviewer C"
+    assert f'href="#finding-{finding.finding_id}"' in _audit(html)
+    assert "Verifier asked." in _audit(html)
+    assert "Chain verified" in _audit(html)
+
+
+def test_a_changed_row_shows_the_chain_as_broken(client, admin):
+    # Only the admin role can bypass the append-only triggers; this simulates
+    # someone editing the database behind the application's back.
+    admin.execute(
+        "UPDATE batch_step SET reading = 150.00 "
+        "WHERE batch_id = 'B26-0413' AND step_id = 'S-DISP-01'"
+    )
+    admin.commit()
+    html = _audit(_html(client, "/batches/B26-0413"))
+    assert "Chain broken" in html
+    assert "Stored history may have been altered." in html
+    assert "tl-broken" in html
+
+
+def test_large_chains_verify_only_on_request(client, monkeypatch):
+    from pharma_batch_record_checker.demo import app as demo_app
+
+    monkeypatch.setattr(demo_app, "AUTO_VERIFY_LIMIT", 0)
+    html = _audit(_html(client, "/batches/B26-0413"))
+    assert "Integrity not checked on this view." in html
+    assert "Verify integrity" in html
+    forced = _audit(_html(client, "/batches/B26-0413?verify=1"))
+    assert "Chain verified" in forced
+
+
+# ---------- Reports and footer ----------
+
+
+def test_footer_has_copyright_and_contact(client, monkeypatch):
+    monkeypatch.delenv("CONTACT_EMAIL", raising=False)
+    html = _html(client, "/")
+    footer = html.split('<footer class="footer">', 1)[1]
+    assert "&copy; " in footer and "Momentum Blue FDEs" in footer
+    assert 'href="mailto:contact@momentumblue.example?subject=' in footer
+    assert "flags steps for a person to check" not in footer
+    monkeypatch.setenv("CONTACT_EMAIL", "qa@momentumblue.example")
+    assert "mailto:qa@momentumblue.example" in _html(client, "/")
+
+
+def test_top_bar_has_all_batches_download(client):
+    top = _html(client, "/batches").split("</header>", 1)[0]
+    assert 'href="/reports/all-batches.csv" download' in top
+    assert "mail" not in top.split('class="topbar-actions"', 1)[1]
+
+
+def test_all_batches_report_joins_every_batch_export(client):
+    from pharma_batch_record_checker.store.reads import export_batch_csv
+
+    response = client.get("/reports/all-batches.csv")
+    assert response.status_code == 200
+    assert response.headers["Content-Disposition"] == (
+        'attachment; filename="all-batches-report.csv"'
+    )
+    body = response.get_data(as_text=True)
+    lines = body.split("\r\n")
+    assert lines[0] == export_batch_csv("B26-0413").split("\r\n")[0]
+    assert body.count("batch_id,run_id") == 1
+    rows = [line for line in lines[1:] if line]
+    per_batch = {
+        b: len([x for x in export_batch_csv(b).split("\r\n")[1:] if x])
+        for b in ("B26-0412", "B26-0413", "P26-0201", "P26-0202")
+    }
+    assert len(rows) == sum(per_batch.values())
+    assert [r.split(",")[0] for r in rows] == sorted(r.split(",")[0] for r in rows)
+
+
+def test_email_sending_is_gone(client):
+    assert client.get("/email").status_code == 404
+    assert client.post("/email", data={"to": "a@b.example"}).status_code in (404, 405)
+    assert "email-dialog" not in _html(client, "/batches/B26-0413")
+
+
+def test_batch_page_shows_every_step_with_passed_ones(client):
+    html = _main(_html(client, "/batches/B26-0413"))
+    assert '<h2 id="findings-title">Step-by-step results</h2>' in html
+    assert html.count('data-status="passed"') == 7
+    assert re.search(
+        r'data-filter="passed">.*?Passed <span class="count">7</span>', html, re.DOTALL
+    )
+    assert re.search(
+        r'data-filter="critical">.*?<span class="count">3</span>', html, re.DOTALL
+    )
+    assert re.search(r'data-filter="all">All <span class="count">16</span>', html)
+    # A passed step shows what was recorded.
+    gran01 = html.split('id="step-S-GRAN-01"', 1)[1].split("</article>", 1)[0]
+    assert "Passed every check" in gran01
+    assert "18.0 L" in gran01 and "18.0 to 20.0 L" in gran01
+    # Every strip tile now links to its step card.
+    assert len(re.findall(r'strip-clean">\s*<a href="#step-', html)) == 7
+
+
+def test_clean_batch_lists_all_steps_as_passed(client):
+    html = _main(_html(client, "/batches/B26-0412"))
+    assert html.count('data-status="passed"') == 16
+    assert 'data-filter="critical"' not in html

@@ -199,16 +199,12 @@
       if (!chip) return;
       const want = chip.dataset.filter;
       $$("[data-filter]", chips).forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+      // Filter by the step's result; every finding on a step shares it.
       let shown = 0;
       cards.forEach((card) => {
-        let any = false;
-        $$(".finding", card).forEach((f) => {
-          const hit = want === "all" || f.dataset.status === want;
-          f.hidden = !hit;
-          if (hit) any = true;
-        });
-        card.hidden = !any;
-        if (any) shown += 1;
+        const hit = want === "all" || card.dataset.status === want;
+        card.hidden = !hit;
+        if (hit) shown += 1;
       });
       if (noMatch) noMatch.hidden = shown !== 0;
     });

@@ -137,6 +137,19 @@ def test_other_blanks_read_not_recorded_and_are_not_flagged():
     assert by_label["Verified by"].value == NOT_RECORDED
     assert not by_label["Verified by"].flagged
     assert finding.missing_labels == ("Performed by",)
+    non_critical = _only(
+        [
+            _finding(
+                rule_id="missing_performer",
+                critical=False,
+                performed_by=None,
+                verified_by=None,
+            )
+        ]
+    )
+    assert {f.label: f.value for f in non_critical.snapshot}["Verified by"] == (
+        "Not required"
+    )
 
 
 def test_range_picture_only_for_out_of_range():
@@ -184,8 +197,8 @@ def test_overview_of_a_clean_run():
     assert summary.sentence.startswith("No findings.")
 
 
-def test_process_strip_marks_every_master_step():
-    master = [
+def _master_steps():
+    return [
         StoredMasterStep(
             1,
             "S-DISP-01",
@@ -194,8 +207,8 @@ def test_process_strip_marks_every_master_step():
             "Weigh API",
             "API net weight",
             "kg",
-            None,
-            None,
+            Decimal("149.25"),
+            Decimal("150.75"),
             True,
         ),
         StoredMasterStep(
@@ -211,11 +224,66 @@ def test_process_strip_marks_every_master_step():
             True,
         ),
     ]
-    strip = process_strip(master, group_findings([_finding()], {}))
+
+
+def _batch_rows():
+    from pharma_batch_record_checker.store.reads import StoredBatchStep
+
+    return [
+        StoredBatchStep(
+            "S-DISP-01",
+            Decimal("149.96"),
+            "kg",
+            "OP-1",
+            datetime(2026, 10, 13, 7, 0),
+            "OP-2",
+            datetime(2026, 10, 13, 7, 10),
+            "Checked.",
+        ),
+        StoredBatchStep(
+            "S-COAT-02",
+            Decimal("3.6"),
+            "%",
+            "OP-9",
+            datetime(2026, 10, 13, 13, 30),
+            "OP-9",
+            datetime(2026, 10, 13, 13, 40),
+            None,
+        ),
+    ]
+
+
+def test_step_results_add_passed_steps_in_process_order():
+    from pharma_batch_record_checker.demo.view import step_results
+
+    results = step_results(
+        _master_steps(), _batch_rows(), group_findings([_finding()], {})
+    )
+    steps = [s for g in results for s in g.steps]
+    assert [(s.step_id, s.passed, s.status) for s in steps] == [
+        ("S-DISP-01", True, "passed"),
+        ("S-COAT-02", False, "critical"),
+    ]
+    passed = steps[0]
+    values = {f.label: f.value for f in passed.values}
+    assert values["Reading"] == "149.96 kg"
+    assert values["Allowed range"] == "149.25 to 150.75 kg"
+    assert values["Verified by"] == "OP-2"
+    assert passed.comment == "Checked."
+    assert [g.unit_procedure for g in results] == ["Dispensing", "Coating"]
+
+
+def test_process_strip_marks_every_master_step():
+    from pharma_batch_record_checker.demo.view import step_results
+
+    master = _master_steps()
+    results = step_results(master, _batch_rows(), group_findings([_finding()], {}))
+    strip = process_strip(master, results)
     assert [(s.step_id, s.status, s.anchor) for s in strip] == [
-        ("S-DISP-01", "clean", None),
+        ("S-DISP-01", "clean", "step-S-DISP-01"),
         ("S-COAT-02", "critical", "step-S-COAT-02"),
     ]
+    assert strip[0].findings == ()
     assert strip[1].findings == ("Reading outside the allowed range",)
 
 
@@ -243,3 +311,54 @@ def test_notes_stay_attached_to_their_finding():
         "Reviewer A",
         "2026-11-10 14:23 UTC",
     )
+
+
+def test_chain_status_messages():
+    from pharma_batch_record_checker.demo.view import ChainStatus
+
+    assert "all 3 recorded events" in ChainStatus(True, True, 3).message
+    broken = ChainStatus(True, False, 3, failed_seq=2, failed_check="payload_hash")
+    assert broken.message.startswith("Chain broken at the highlighted entry")
+    assert "stored data" in broken.message
+    assert ChainStatus(False, False, 9).message == "Integrity not checked on this view."
+
+
+def test_audit_entry_describes_each_event_kind():
+    from pharma_batch_record_checker.demo.view import audit_entry
+
+    common = {
+        "event_hash": "a" * 64,
+        "prev_event_hash": "b" * 64,
+        "created_at": datetime(2026, 11, 10, 9, 5, tzinfo=UTC),
+        "master_label": "MBR-SYN500 v3",
+    }
+    run = audit_entry(
+        {
+            **common,
+            "event_seq": 3,
+            "event_type": "review_run",
+            "rule_version": "1.0.0",
+            "result_category": "Critical",
+            "run_findings": 1,
+        }
+    )
+    assert (run.title, run.detail) == (
+        "Reviewed: Critical",
+        "Rule version 1.0.0 found 1 finding.",
+    )
+    assert run.short_hash == "a" * 10 and run.when == "2026-11-10 09:05 UTC"
+    note = audit_entry(
+        {
+            **common,
+            "event_seq": 4,
+            "event_type": "finding_note",
+            "reviewer_name": "Reviewer A",
+            "note_text": "x" * 200,
+            "finding_id": "f-1",
+            "step_id": "S-COAT-02",
+            "rule_id": "same_person",
+        }
+    )
+    assert note.title == "Note added by Reviewer A"
+    assert note.detail.startswith("On S-COAT-02 · Checked by the person who did it:")
+    assert note.detail.endswith("…”") and note.anchor == "finding-f-1"

@@ -65,9 +65,15 @@ uv run pharma-review-demo
 
 That command starts the local Postgres when it is not already running, applies the migrations, loads the approved sample when it is not already stored, and serves http://127.0.0.1:8000. The same command is enough the next time. Docker is required for that local database.
 
-The pages are an Overview, a searchable Batches list with a calendar and status tabs, one page per batch (its findings, notes, and CSV download or email link), and a Guide with a glossary and FAQ for readers new to batch records. `pharma-batch-record-checker` stays the CLI. The store writes through `insert_master`, `insert_batch`, `insert_review_run`, and `insert_finding_note`.
+The pages are an Overview, a searchable Batches list with a calendar and status tabs, one page per batch (its findings, notes, review history, and report download), and a Guide with a glossary and FAQ for readers new to batch records. `pharma-batch-record-checker` stays the CLI. The store writes through `insert_master`, `insert_batch`, `insert_review_run`, and `insert_finding_note`.
 
 Set `DATABASE_URL` and `DATABASE_ADMIN_URL` first when you are not using the local database. Those URLs are in `.env.example`. `uv run pytest` runs the tests. Database tests skip when `DATABASE_URL` is unset, and they clear the stored rows, so run `uv run pharma-review-demo` again afterward to load the sample.
+
+## Reports
+
+Every batch page has a download button (⬇) for that batch's report: every review run, finding and note. The download button at the right of the top bar gets the **all-batches report**, which joins every batch's export under one header (`/reports/all-batches.csv`).
+
+The footer's "Contact us" link opens a new email to `CONTACT_EMAIL`. **TODO:** set it in `.env` (copy `.env.example`); until then a placeholder address is shown.
 
 ## Generate a dataset and view it
 

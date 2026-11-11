@@ -53,9 +53,12 @@ rounded:
   marked with `aria-current="page"`. Below 760px it collapses to a menu
   button. The batch ID is never the top bar title; batch pages use a
   breadcrumb (Batches › B26-0413) and their own heading.
-- **Footer**: what the tool does and does not do, and that all data is
-  synthetic and times are UTC. This replaces the old "Synthetic data · review
-  only" header text.
+- **Top bar action** (right-most): download (⬇) the all-batches report.
+  On phones it sits beside the menu button.
+- **Footer**: "© {year} Momentum Blue FDEs. All rights reserved.", an FAQ link,
+  and "Contact us" (a mailto to `CONTACT_EMAIL`; a placeholder until set).
+  What the tool does and does not do is explained on the Overview, the Guide
+  and in the help panels.
 - **Help panel** at the foot of the Overview, Batches and batch pages: the
   glossary terms used on that page, three FAQs, and a link to the Guide.
 
@@ -71,12 +74,14 @@ rounded:
   (`?on=YYYY-MM-DD`) the page lists the review runs stored that UTC day.
 - **Batch (`/batches/<id>`)**: breadcrumb; a header card with the result
   badge, product, master record, batch size and last review time, and two
-  icon buttons — download CSV and email a link to the CSV (a mail link cannot
-  attach a file). Then counts, the **process strip** (every master step as a
-  numbered tile: red Critical, amber Needs Review, green passed; flagged tiles
-  jump to the step), a sticky flagged-step list on wide screens, filter
-  chips (All / Critical / Needs Review), one card per flagged step, and the
-  review history.
+  icon buttons — download the batch report (CSV) and jump to the review history. Then counts, the **process strip** (every master step as a
+  numbered tile: red Critical, amber Needs Review, green passed; every tile
+  jumps to its step), a sticky list of all steps on wide screens, filter
+  chips by step result (All / Critical / Needs Review / Passed), the
+  **Step-by-step results** (every step in process order: a finding card for
+  each flagged step, a compact green card with the recorded values for each
+  passed step), and the
+  **Review history** (a shield icon button in the header jumps to it).
 - **Guide (`/guide`)**: results, the eight checks, an A–Z glossary and the
   FAQ. Glossary and FAQ text live in `demo/view.py` (`GLOSSARY`, `FAQ`,
   `PAGE_TERMS`).
@@ -99,6 +104,17 @@ rounded:
   JavaScript it is the browser's date field.
 - **Icon buttons**: 44px square, outlined, with a tooltip and an
   `aria-label`.
+
+- **Review history** (the audit trail): the batch's hash-chain events, oldest first, as a vertical
+  timeline — master record stored, batch record stored, each review run (the
+  newest tagged "Latest review"), and each note (linking to its finding). Each
+  entry shows its UTC time and a short hash; the system-wide entry number is
+  not shown, because other batches' entries fill the gaps. A banner above it
+  reports `verify_chain()`: green "Chain verified" with the event count, or red
+  "Chain broken at the highlighted entry" with that entry marked. The check covers the whole
+  chain, so it runs on every view only up to 2,000 events (`AUTO_VERIFY_LIMIT`);
+  above that a "Verify integrity" button runs it on request (`?verify=1`).
+  Read-only: it only selects from `audit_event` and the joined rows.
 
 ## Responsive
 

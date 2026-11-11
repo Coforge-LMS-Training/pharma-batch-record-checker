@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 
 from pharma_batch_record_checker.demo.app import create_app
+from pharma_batch_record_checker.demo.envfile import load_env_file
 from pharma_batch_record_checker.demo.setup import prepare
 
 
@@ -33,6 +34,7 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    load_env_file(Path.cwd() / ".env")  # e.g. CONTACT_EMAIL; shell wins
     if args.data is not None and args.no_setup:
         parser.error("--data loads during setup, so it can't be used with --no-setup")
     if args.no_setup:
