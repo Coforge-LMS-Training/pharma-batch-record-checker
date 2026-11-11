@@ -37,6 +37,7 @@ from pharma_batch_record_checker.demo.view import (
     NEEDS_A_LOOK,
     RESULT_GUIDE,
     ChainStatus,
+    Notice,
     audit_entry,
     format_day,
     format_decimal,
@@ -168,6 +169,8 @@ def create_app() -> Flask:
             "day_error": day_error,
             "review_days": _review_days(),
             "stats": _stats(all_rows),
+            "sync": sync_state(latest_runs(), running_version()),
+            "notice": _list_notice(all_rows),
         }
         if day is not None:
             runs = list_runs_on(day)
@@ -240,6 +243,11 @@ def create_app() -> Flask:
             code = "done" if result.run_id is not None else result.standing.value
             if code == "not-reviewed":
                 code = "failed"
+        if request.form.get("back") == "batches":
+            return redirect(
+                url_for("index", **_list_filters(), rereview=code, batch=batch_id),
+                code=303,
+            )
         return redirect(
             url_for("batch_page", batch_id=batch_id, rereview=code), code=303
         )
@@ -254,7 +262,8 @@ def create_app() -> Flask:
             app.logger.warning("re-review of %s failed: %s", batch_id, reason)
         return redirect(
             url_for(
-                "overview_page",
+                "index" if request.form.get("back") == "batches" else "overview_page",
+                **(_list_filters() if request.form.get("back") == "batches" else {}),
                 synced=len(report.rereviewed),
                 current=len(report.current),
                 newer=len(report.newer),
@@ -307,6 +316,43 @@ def stored(view: Any) -> Any:
     return wrapped
 
 
+# Longest search text carried back to the list after a re-review.
+MAX_QUERY_LENGTH = 200
+
+
+def _list_filters() -> dict[str, str]:
+    """The list's status and search from a re-review form, if they are sane.
+
+    Only a known status and a short search are carried back; anything else
+    is dropped, so the redirect never echoes arbitrary input.
+    """
+    filters: dict[str, str] = {}
+    status = request.form.get("status", "")
+    if status in STATUS_FILTERS:
+        filters["status"] = status
+    query = request.form.get("q", "")
+    if isinstance(query, str) and 0 < len(query.strip()) <= MAX_QUERY_LENGTH:
+        filters["q"] = query.strip()
+    return filters
+
+
+def _list_notice(rows: list[dict[str, Any]]) -> Notice | None:
+    """The status line on the list after a row's re-review or a Re-review all.
+
+    A row's line names its batch, and is shown only for a batch on the list.
+    """
+    rules_version = running_version()
+    batch_id = request.args.get("batch", "")
+    row = next((row for row in rows if row["batch_id"] == batch_id), None)
+    if row is not None:
+        notice = rereview_notice(
+            request.args.get("rereview", ""), rules_version, row["rules"]
+        )
+        if notice is not None:
+            return replace(notice, text=f"{batch_id}: {notice.text}")
+    return sync_notice(request.args, rules_version)
+
+
 def _cross_origin() -> bool:
     """True when a POST names another site in Origin, or else in Referer.
 
@@ -340,11 +386,15 @@ def _batch_rows(batches: tuple[BatchSummary, ...]) -> list[dict[str, Any]]:
     """One display row per batch: ids, product, latest result, and counts."""
     products = _product_names(batches)
     counts = _latest_counts()
+    latest = latest_runs()
+    rules_version = running_version()
     rows = []
     for batch in batches:
         product = products[(batch.master_record_id, batch.master_version)]
         steps, findings = counts.get(batch.batch_id, (None, None))
         master = f"{batch.master_record_id} v{batch.master_version}"
+        run = latest.get(batch.batch_id)
+        rules = None if run is None else run.rule_version
         rows.append(
             {
                 "batch_id": batch.batch_id,
@@ -355,6 +405,8 @@ def _batch_rows(batches: tuple[BatchSummary, ...]) -> list[dict[str, Any]]:
                 "reviewed": batch.created_at,
                 "steps": steps,
                 "findings": findings,
+                "rules": rules,
+                "can_rereview": standing(rules, rules_version).moves_forward,
                 "search": f"{batch.batch_id} {master} {product}".lower(),
             }
         )

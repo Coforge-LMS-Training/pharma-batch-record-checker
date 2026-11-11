@@ -1491,3 +1491,7 @@ main.page > .crumbs + .card { margin-top: 0.75rem; }
 .notice .icon { flex: none; margin-top: 0.15rem; }
 .notice-ok { border-color: var(--ok-border); background: var(--ok-bg); color: var(--ok); }
 .notice-alert { border-color: var(--critical-border); background: var(--critical-bg); color: var(--critical); font-weight: 600; }
+.rules-cell { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.rules-tag { font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.btn-xs { min-height: 1.85rem; padding: 0 0.55rem; font-size: 0.8rem; gap: 0.3rem; }
+.btn-xs .icon { width: 0.95rem; height: 0.95rem; }

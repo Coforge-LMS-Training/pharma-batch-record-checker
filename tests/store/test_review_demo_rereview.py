@@ -6,6 +6,7 @@ at call time. Synthetic rows only; skipped when DATABASE_URL is unset.
 """
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -191,3 +192,82 @@ def test_guide_lists_only_the_engine_checks(client):
     assert checks.count("<li>") == len(rules.RULE_IDS)
     for rule_id, entry in RULE_GUIDE.items():
         assert (entry.title in checks) == (rule_id in rules.RULE_IDS), rule_id
+
+
+def _row(html: str, batch_id: str) -> str:
+    """One batch's row in the Batches table."""
+    match = re.search(
+        rf"<tr[^>]*>\s*<td[^>]*>\s*<a[^>]*>{batch_id}</a>.*?</tr>", html, re.DOTALL
+    )
+    assert match, batch_id
+    return match.group(0)
+
+
+def test_batches_table_shows_the_rules_each_batch_was_evaluated_on(client):
+    """Each row names its latest run's rules; current rows offer no button."""
+    html = _main(client, "/batches")
+    assert "<th>Rules</th>" in html
+    for batch_id in SAMPLE_BATCHES:
+        row = _row(html, batch_id)
+        assert f">{LOADED}<" in row
+        assert "/rereview" not in row
+    assert 'action="/rereview-all"' not in html
+
+
+def test_batches_table_offers_a_button_per_older_row(client, newer_rules):
+    """Rows on older rules get their own button, and the page a Re-review all."""
+    html = _main(client, "/batches")
+    for batch_id in SAMPLE_BATCHES:
+        assert f'action="/batches/{batch_id}/rereview"' in _row(html, batch_id)
+    assert 'action="/rereview-all"' in html
+    assert "Re-review all (4)" in html
+
+
+def test_row_button_re_reviews_and_returns_to_the_filtered_list(client, newer_rules):
+    """The row form comes back to the same list, with a line naming the batch."""
+    response = client.post(
+        f"/batches/{BATCH}/rereview",
+        data={"back": "batches", "status": "critical", "q": "B26"},
+    )
+    assert response.status_code == 303
+    location = response.headers["Location"]
+    assert location.startswith("/batches?")
+    for part in ("status=critical", "q=B26", "rereview=done", f"batch={BATCH}"):
+        assert part in location
+    html = _main(client, location)
+    assert f"{BATCH}: Re-reviewed with rules {NEWER}" in html
+    row = _row(html, BATCH)
+    assert f">{NEWER}<" in row
+    assert "/rereview" not in row
+    assert len(list_runs(BATCH)) == 2
+
+
+def test_row_return_ignores_unknown_filters(client, newer_rules):
+    """Only known status values and short searches are carried back."""
+    response = client.post(
+        f"/batches/{BATCH}/rereview",
+        data={"back": "batches", "status": "bogus", "q": "x" * 500},
+    )
+    location = response.headers["Location"]
+    assert "status=" not in location and "q=" not in location
+
+
+def test_unknown_back_value_returns_to_the_batch_page(client, newer_rules):
+    """Anything but back=batches goes to the batch page, as before."""
+    response = client.post(f"/batches/{BATCH}/rereview", data={"back": "//evil"})
+    assert response.headers["Location"].startswith(f"/batches/{BATCH}?")
+
+
+def test_rereview_all_from_the_list_returns_to_the_list(client, newer_rules):
+    """The list's Re-review all comes back to the list with the counts."""
+    response = client.post("/rereview-all", data={"back": "batches"})
+    location = response.headers["Location"]
+    assert location.startswith("/batches?") and "synced=4" in location
+    html = _main(client, location)
+    assert f"4 batches re-reviewed with rules {NEWER}" in html
+
+
+def test_list_notice_ignores_a_batch_it_does_not_show(client, newer_rules):
+    """A crafted ?batch= that isn't a stored batch shows no line."""
+    html = _main(client, "/batches?rereview=done&batch=NOT-A-BATCH")
+    assert "NOT-A-BATCH" not in html
