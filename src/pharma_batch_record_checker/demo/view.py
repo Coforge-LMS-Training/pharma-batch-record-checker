@@ -14,8 +14,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from pharma_batch_record_checker.store.reads import (
+    StoredBatchStep,
     StoredFinding,
     StoredMasterStep,
     StoredNote,
@@ -32,6 +34,10 @@ STATUS_SLUGS: dict[str, str] = {
 
 MISSING = "Missing"
 NOT_RECORDED = "Not recorded"
+NOT_REQUIRED = "Not required"
+
+# Only critical steps need a second-person check.
+_VERIFIER_FIELDS = frozenset({"verified_by", "verified_at"})
 
 
 @dataclass(frozen=True)
@@ -118,6 +124,14 @@ class Term:
 
 
 GLOSSARY: tuple[Term, ...] = (
+    Term(
+        "audit-trail",
+        "Audit trail (hash chain)",
+        "The permanent, time-ordered record of everything stored: records "
+        "loaded, reviews run and notes added. Each entry carries a fingerprint "
+        "(hash) of the one before it, so any later change would break the chain "
+        "and show up when it is verified.",
+    ),
     Term(
         "allowed-range",
         "Allowed range (limits)",
@@ -312,7 +326,15 @@ FAQ: tuple[tuple[str, str], ...] = (
         "What is in the CSV download?",
         (
             "Every review run of the batch, every finding with the values it was "
-            "judged on, and every note. The email button sends a link to that file."
+            "judged on, and every note."
+        ),
+    ),
+    (
+        "How do I know the history has not been changed?",
+        (
+            "Every stored record, review and note is linked into a hash chain. "
+            "The Review history on each batch page re-checks the whole chain and "
+            "shows Chain verified, or the first entry that no longer matches."
         ),
     ),
     (
@@ -336,6 +358,7 @@ PAGE_TERMS: dict[str, tuple[str, ...]] = {
         "comment",
         "note",
         "run",
+        "audit-trail",
     ),
 }
 
@@ -558,7 +581,9 @@ class FindingView:
     def _field(self, name: str, label: str, flagged: bool) -> SnapshotField:
         value = getattr(self, name)
         missing = value is None
-        if missing:
+        if missing and name in _VERIFIER_FIELDS and self.master_critical == "No":
+            shown = NOT_REQUIRED
+        elif missing:
             shown = MISSING if flagged else NOT_RECORDED
         else:
             shown = value
@@ -585,6 +610,8 @@ class StepView:
         self.phase = phase
         self.findings: list[FindingView] = []
 
+    passed = False
+
     @property
     def severity(self) -> str:
         """The step's severity. Every finding on a step carries the same one."""
@@ -595,12 +622,60 @@ class StepView:
         return status_slug(self.severity)
 
 
+class PassedStepView:
+    """A step that passed every check: what was recorded, with no findings."""
+
+    passed = True
+    status = "passed"
+    severity = "Passed"
+    findings: tuple[FindingView, ...] = ()
+
+    def __init__(self, master: StoredMasterStep, row: StoredBatchStep) -> None:
+        self.step_id = master.step_id
+        self.step_seq = master.step_seq
+        self.parameter = master.parameter or "Sign-off"
+        self.unit_procedure = master.unit_procedure
+        self.operation = master.operation
+        self.phase = master.phase
+        self.comment = row.comment
+        recorded: list[tuple[str, str | None]] = []
+        if master.parameter is not None:
+            recorded.append(("Reading", _reading_with_unit(row.reading, row.unit)))
+            recorded.append(
+                (
+                    "Allowed range",
+                    format_limits(master.min_value, master.max_value, master.unit),
+                )
+            )
+        recorded += [
+            ("Performed by", format_text(row.performed_by)),
+            ("Performed at", format_recorded_time(row.performed_at)),
+            ("Verified by", format_text(row.verified_by)),
+            ("Verified at", format_recorded_time(row.verified_at)),
+            ("Critical step", "Yes" if master.critical else "No"),
+        ]
+
+        def shown(label: str, value: str | None) -> str:
+            if value is not None:
+                return value
+            if label.startswith("Verified") and not master.critical:
+                return NOT_REQUIRED
+            return NOT_RECORDED
+
+        self.values = tuple(
+            SnapshotField(
+                label.lower(), label, shown(label, value), False, value is None
+            )
+            for label, value in recorded
+        )
+
+
 class ProcedureView:
-    """One unit procedure and its flagged steps, in process order."""
+    """One unit procedure and its steps, in process order."""
 
     def __init__(self, unit_procedure: str) -> None:
         self.unit_procedure = unit_procedure
-        self.steps: list[StepView] = []
+        self.steps: list[Any] = []
 
 
 def group_findings(
@@ -637,6 +712,35 @@ def group_findings(
         step.findings.append(
             FindingView(finding, notes_by_finding.get(finding.finding_id, ()))
         )
+    return tuple(procedures.values())
+
+
+def step_results(
+    master_steps: Sequence[StoredMasterStep],
+    batch_steps: Sequence[StoredBatchStep],
+    groups: Sequence[ProcedureView],
+) -> tuple[ProcedureView, ...]:
+    """Every master step in process order: its findings, or what passed.
+
+    Flagged steps come from the grouped findings. Any other master step that
+    has a batch row passed every check in this run. Grouped by procedure in
+    master order.
+    """
+    flagged = {step.step_id: step for g in groups for step in g.steps}
+    rows = {row.step_id: row for row in batch_steps}
+    procedures: dict[str, ProcedureView] = {}
+    for master in sorted(master_steps, key=lambda m: m.step_seq):
+        step: Any = flagged.get(master.step_id)
+        if step is None:
+            row = rows.get(master.step_id)
+            if row is None:
+                continue  # no row and no finding: nothing to show for this run
+            step = PassedStepView(master, row)
+        procedure = procedures.get(master.unit_procedure)
+        if procedure is None:
+            procedure = ProcedureView(master.unit_procedure)
+            procedures[master.unit_procedure] = procedure
+        procedure.steps.append(step)
     return tuple(procedures.values())
 
 
@@ -698,25 +802,142 @@ class StripStep:
 
 def process_strip(
     master_steps: Sequence[StoredMasterStep],
-    groups: Sequence[ProcedureView],
+    results: Sequence[ProcedureView],
 ) -> tuple[StripStep, ...]:
-    """Every master step in order, marked with its result in this run."""
-    flagged = {step.step_id: step for g in groups for step in g.steps}
+    """Every master step in order, marked with its result in this run.
+
+    A tile links to its step card whenever the page shows one, passed or not.
+    """
+    shown = {step.step_id: step for g in results for step in g.steps}
     strip = []
     for master in master_steps:
-        step = flagged.get(master.step_id)
+        step = shown.get(master.step_id)
+        flagged = step is not None and not step.passed
         strip.append(
             StripStep(
                 step_seq=master.step_seq,
                 step_id=master.step_id,
                 label=master.parameter or master.phase,
                 unit_procedure=master.unit_procedure,
-                status="clean" if step is None else step.status,
-                anchor=None if step is None else f"step-{step.step_id}",
-                findings=() if step is None else tuple(f.title for f in step.findings),
+                status=step.status if flagged else "clean",
+                anchor=None if step is None else f"step-{master.step_id}",
+                findings=tuple(f.title for f in step.findings) if flagged else (),
             )
         )
     return tuple(strip)
+
+
+@dataclass(frozen=True)
+class AuditEntry:
+    """One hash-chain event that belongs to a batch, in plain words."""
+
+    seq: int
+    kind: str
+    icon: str
+    title: str
+    detail: str
+    when: str
+    event_hash: str
+    prev_hash: str
+    anchor: str | None = None
+    latest: bool = False
+
+    @property
+    def short_hash(self) -> str:
+        return self.event_hash[:10]
+
+    @property
+    def short_prev(self) -> str:
+        return self.prev_hash[:10]
+
+
+@dataclass(frozen=True)
+class ChainStatus:
+    """The result of verify_chain, or that it was not run on this view."""
+
+    checked: bool
+    ok: bool
+    events: int
+    failed_seq: int | None = None
+    failed_check: str | None = None
+
+    @property
+    def message(self) -> str:
+        if not self.checked:
+            return "Integrity not checked on this view."
+        if self.ok:
+            return (
+                f"Chain verified: all {self.events} recorded events still match "
+                "their hashes. Nothing has been changed or removed."
+            )
+        what = {
+            "prev_event_hash": "its link to the event before it",
+            "event_hash": "its own hash",
+            "payload_hash": "the stored data it describes",
+        }.get(self.failed_check or "", "its hash")
+        return (
+            f"Chain broken at the highlighted entry: {what} no longer matches. "
+            "Stored history may have been altered."
+        )
+
+
+def audit_entry(row: dict[str, Any]) -> AuditEntry:
+    """Describe one audit_event row (joined with its run or note) in plain words."""
+    kind = str(row["event_type"])
+    when = format_store_time(row["created_at"])
+    base = {
+        "seq": int(row["event_seq"]),
+        "kind": kind,
+        "when": when,
+        "event_hash": str(row["event_hash"]),
+        "prev_hash": str(row["prev_event_hash"]),
+    }
+    if kind == "master_import":
+        return AuditEntry(
+            **base,
+            icon="i-book",
+            title="Master record stored",
+            detail=(
+                f"{row['master_label']}: the approved recipe this batch is "
+                "checked against."
+            ),
+        )
+    if kind == "batch_import":
+        steps = row.get("batch_steps")
+        return AuditEntry(
+            **base,
+            icon="i-list",
+            title="Batch record stored",
+            detail=(
+                f"{_count(int(steps), 'executed step')} recorded by operators."
+                if steps is not None
+                else "Executed steps recorded by operators."
+            ),
+        )
+    if kind == "review_run":
+        findings = int(row.get("run_findings") or 0)
+        return AuditEntry(
+            **base,
+            icon="i-flag",
+            title=f"Reviewed: {row['result_category']}",
+            detail=(
+                f"Rule version {row['rule_version']} found "
+                f"{_count(findings, 'finding')}."
+                if findings
+                else f"Rule version {row['rule_version']} found no findings."
+            ),
+        )
+    title = rule_guide(str(row.get("rule_id") or "")).title
+    text = str(row.get("note_text") or "")
+    if len(text) > 140:
+        text = text[:139].rstrip() + "…"
+    return AuditEntry(
+        **base,
+        icon="i-note",
+        title=f"Note added by {row['reviewer_name']}",
+        detail=f"On {row['step_id']} · {title}: “{text}”",
+        anchor=f"finding-{row['finding_id']}",
+    )
 
 
 def _count(n: int, noun: str) -> str:

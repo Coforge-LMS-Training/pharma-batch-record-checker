@@ -856,7 +856,8 @@ main.page > .crumbs + .card { margin-top: 0.75rem; }
   text-decoration: none;
 }
 
-.strip-clean > span { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+.strip-clean > span,
+.strip-clean > a { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
 .strip-critical > a { background: var(--critical-solid); color: #fff; }
 .strip-needs-review > a { background: var(--review-solid); color: #fff; }
 .strip-step > a { transition: transform 120ms, box-shadow 120ms; }
@@ -1303,3 +1304,173 @@ main.page > .crumbs + .card { margin-top: 0.75rem; }
 
 .empty-state .icon-warn { color: var(--review-solid); }
 .empty-state .icon-muted { color: var(--muted); }
+
+/* ---------- Audit trail ---------- */
+
+.chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.75rem;
+  margin: 1rem 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.chain > .icon { width: 1.5rem; height: 1.5rem; }
+.chain p { flex: 1 1 16rem; font-weight: 600; }
+.chain-ok { border-color: var(--ok-border); background: var(--ok-bg); color: var(--ok); }
+.chain-bad { border-color: var(--critical-border); background: var(--critical-bg); color: var(--critical); }
+.chain-unchecked { color: var(--muted); }
+
+.timeline {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.75rem;
+  bottom: 0.75rem;
+  left: 1.1rem;
+  width: 2px;
+  background: var(--border);
+}
+
+.tl-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.9rem;
+  padding: 0.5rem 0 1rem;
+}
+
+.tl-icon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--none-bg);
+  color: var(--muted);
+}
+
+.tl-master_import .tl-icon,
+.tl-batch_import .tl-icon { background: var(--primary-soft); color: var(--primary); }
+.tl-review_run .tl-icon { background: var(--review-bg); color: var(--review); }
+.tl-finding_note .tl-icon { background: var(--ok-bg); color: var(--ok); }
+.tl-broken .tl-icon { background: var(--critical-solid); color: #fff; }
+
+.tl-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.tl-title a { color: var(--text); }
+.tl-title a:hover { color: var(--primary); }
+.tl-detail { color: var(--muted); max-width: 70ch; overflow-wrap: anywhere; }
+
+.tl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.tl-meta > span { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+.tl-meta code {
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  background: var(--none-bg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.tl-broken .tl-title { color: var(--critical); }
+
+/* ---------- Top bar report buttons ---------- */
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.top-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: var(--radius-sm);
+  color: var(--nav-ink);
+  background: rgb(255 255 255 / 6%);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+
+.top-btn:hover { background: rgb(255 255 255 / 16%); border-color: rgb(255 255 255 / 45%); }
+.top-btn .icon { width: 1.25rem; height: 1.25rem; }
+
+/* Tooltips under buttons in the top bar, so they don't leave the window. */
+[data-tip-below]::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform: translate(0, -4px);
+}
+
+[data-tip-below]:hover::after,
+[data-tip-below]:focus-visible::after { transform: translate(0, 0); }
+
+/* ---------- Footer ---------- */
+
+.footer-inner { align-items: center; }
+.footer-links { display: flex; gap: 1.25rem; }
+.footer-links a { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; text-decoration: none; }
+.footer-links a:hover { text-decoration: underline; }
+
+@media (max-width: 760px) {
+  .topbar-actions { margin-left: auto; order: 2; }
+  .nav-toggle { margin-left: 0; order: 3; }
+  .footer-inner { flex-direction: row; justify-content: space-between; }
+}
+
+/* ---------- Passed steps ---------- */
+
+.dot-passed { background: var(--ok-solid); }
+.step-passed { border-left-color: var(--ok-solid); }
+.passed-body { padding: 1rem 1.5rem 1.25rem; }
+
+.passed-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.fields-compact { margin-top: 0.75rem; }
+.fields-compact .field-tile { background: var(--surface-2); }
+
+@media (max-width: 760px) {
+  .passed-body { padding-left: 1.1rem; padding-right: 1.1rem; }
+}
