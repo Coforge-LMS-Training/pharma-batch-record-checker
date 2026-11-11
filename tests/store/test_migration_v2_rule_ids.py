@@ -45,12 +45,17 @@ def test_0007_is_the_single_head_after_0006():
     assert scripts.get_revision(REVISION).down_revision == "0006_review_problem"
 
 
-def test_0007_keeps_the_engine_rule_ids_and_adds_the_v2_ones():
-    """The v1 part equals the engine's 8 ids; the v2 part adds rules 9 and 10."""
+def test_0007_allows_every_engine_rule_id_and_the_v2_ones():
+    """0007 allows the 8 v1 ids plus rules 9 and 10, and every id the engine has.
+
+    Holds before and after the engine turns the v2 rules on.
+    """
     migration = load_migration()
-    assert migration._V1_RULE_IDS == RULE_IDS
+    allowed = migration._V1_RULE_IDS + migration._V2_RULE_IDS
+    assert len(migration._V1_RULE_IDS) == 8
     assert migration._V2_RULE_IDS == V2_RULE_IDS
-    assert len(set(migration._V1_RULE_IDS + migration._V2_RULE_IDS)) == 10
+    assert len(set(allowed)) == 10
+    assert set(RULE_IDS) <= set(allowed)
 
 
 @pytest.mark.db
@@ -61,5 +66,5 @@ def test_finding_check_allows_all_ten_rule_ids(admin):
         "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint "
         "WHERE conname = 'finding_rule_id_known'"
     ).fetchone()
-    for rule_id in RULE_IDS + V2_RULE_IDS:
+    for rule_id in set(RULE_IDS) | set(V2_RULE_IDS):
         assert f"'{rule_id}'" in row["definition"]
