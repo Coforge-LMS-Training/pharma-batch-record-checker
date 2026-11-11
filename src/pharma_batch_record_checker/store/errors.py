@@ -27,3 +27,7 @@ class InvalidReview(StoreError):
 
 class FindingNotFound(StoreError):
     """The note names a finding that is not stored."""
+
+
+class StaleReview(StoreError):
+    """The batch's latest run is not the one the re-review started from."""

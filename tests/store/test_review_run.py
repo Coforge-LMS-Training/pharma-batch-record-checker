@@ -18,6 +18,7 @@ from pharma_batch_record_checker.handoff import (
 from pharma_batch_record_checker.parser import parse_files
 from pharma_batch_record_checker.records import MasterVersion
 from pharma_batch_record_checker.review import review
+from pharma_batch_record_checker.rules import RULE_VERSION
 from pharma_batch_record_checker.schema import MasterRow
 from pharma_batch_record_checker.store.errors import BatchNotFound, InvalidReview
 from pharma_batch_record_checker.store.imports import insert_batch, insert_master
@@ -141,7 +142,7 @@ def test_hand_off_persists_the_approved_sample(admin):
             (batch_id,),
         ).fetchone()
         assert row["run_id"] == run_id
-        assert row["rule_version"] == "1.0.0"
+        assert row["rule_version"] == RULE_VERSION
         assert row["result_category"] == reviewed.batches[batch_id].result_category
         assert isinstance(row["created_at"], datetime)
         assert row["created_at"].tzinfo is not None

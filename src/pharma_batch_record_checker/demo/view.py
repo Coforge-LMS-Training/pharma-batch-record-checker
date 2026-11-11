@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from pharma_batch_record_checker.rules import RULE_IDS
 from pharma_batch_record_checker.store.reads import (
     StoredBatchStep,
     StoredFinding,
@@ -49,7 +50,7 @@ class RuleGuide:
     fields: frozenset[str]
 
 
-# One entry per rule id in rule_version 1.0.0. The field names are
+# One entry per rule id in rule_version 1.1.0. The field names are
 # FindingView attributes; they mark the values a reader should look at first.
 RULE_GUIDE: dict[str, RuleGuide] = {
     "out_of_range": RuleGuide(
@@ -96,6 +97,18 @@ RULE_GUIDE: dict[str, RuleGuide] = {
         "The recorded unit is not exactly the master's unit. Units are never "
         "converted, so the range is not checked.",
         frozenset({"recorded_unit", "expected_unit"}),
+    ),
+    "late_verification": RuleGuide(
+        "Checked long after it was done",
+        "The verification was recorded more than 60 minutes after the step was "
+        "performed. Exactly 60 minutes is fine.",
+        frozenset({"performed_at", "verified_at"}),
+    ),
+    "performed_out_of_order": RuleGuide(
+        "Done before the step before it",
+        "The step was performed earlier than the previous step in the master "
+        "record that the batch has. The same time is fine.",
+        frozenset({"performed_at"}),
     ),
 }
 
@@ -241,12 +254,14 @@ GLOSSARY: tuple[Term, ...] = (
         "run",
         "Review run",
         "One automated check of a batch. Each run is stored separately and "
-        "never overwritten, so the history shows every review.",
+        "never overwritten, so the history shows every review. After a rules "
+        "upgrade, a re-review adds a new run with the new rule version; it "
+        "never goes back to older rules.",
     ),
     Term(
         "rule-version",
         "Rule version",
-        "Which version of the eight checks produced a run, currently 1.0.0, so "
+        "Which version of the ten checks produced a run, currently 1.1.0, so "
         "an old result can always be explained.",
     ),
     Term(
@@ -281,7 +296,7 @@ FAQ: tuple[tuple[str, str], ...] = (
     (
         "What does this site do?",
         (
-            "It compares each batch record with its master record using eight "
+            "It compares each batch record with its master record using ten "
             "checks, and lists every place a person should look. It does not "
             "decide anything on its own."
         ),
@@ -366,6 +381,11 @@ PAGE_TERMS: dict[str, tuple[str, ...]] = {
 def page_terms(page: str) -> tuple[Term, ...]:
     """The glossary entries shown at the foot of one page."""
     return tuple(GLOSSARY_BY_KEY[key] for key in PAGE_TERMS.get(page, ()))
+
+
+def guide_checks() -> dict[str, RuleGuide]:
+    """The checks this engine runs, in engine order, for the Guide page."""
+    return {rule_id: RULE_GUIDE[rule_id] for rule_id in RULE_IDS}
 
 
 def rule_guide(rule_id: str) -> RuleGuide:
@@ -942,3 +962,117 @@ def audit_entry(row: dict[str, Any]) -> AuditEntry:
 
 def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+@dataclass(frozen=True)
+class Notice:
+    """One status line on a page. kind is "ok", "info" or "alert"."""
+
+    kind: str
+    text: str
+
+
+@dataclass(frozen=True)
+class SyncState:
+    """How the stored batches stand against the running rules (Overview)."""
+
+    rules_version: str
+    due: int
+    newer: int
+    unknown: int
+
+
+def rereview_notice(
+    code: str, rules_version: str, latest_version: str | None
+) -> Notice | None:
+    """The line shown after a batch's re-review redirect, from its ?rereview= code.
+
+    Only the codes the route sends are known; anything else shows nothing.
+    """
+    if code == "done":
+        return Notice(
+            "ok",
+            f"Re-reviewed with rules {rules_version}. The new run is the latest "
+            "review; earlier runs and their findings are kept as they were.",
+        )
+    if code == "current":
+        return Notice(
+            "info",
+            f"Already reviewed with the current rules ({rules_version}). "
+            "Nothing was added.",
+        )
+    if code == "newer":
+        return Notice("info", newer_rules_text(latest_version or "?", rules_version))
+    if code == "unknown":
+        return Notice(
+            "info",
+            "This batch's rule version can't be compared with this app's "
+            f"({rules_version}), so nothing was added.",
+        )
+    if code == "failed":
+        return Notice(
+            "alert",
+            "The re-review could not be completed. Nothing was added. "
+            "The app log names the reason.",
+        )
+    return None
+
+
+def newer_rules_text(latest_version: str, rules_version: str) -> str:
+    """Why an older app leaves a batch alone."""
+    return (
+        f"This batch's latest review used newer rules ({latest_version}) than "
+        f"this app ({rules_version}). Reviews only move forward, so this app "
+        "won't add one."
+    )
+
+
+_SYNC_KEYS = ("synced", "current", "newer", "unknown", "failed")
+
+
+def sync_notice(args: Any, rules_version: str) -> Notice | None:
+    """The summary after "Re-review all", read from the redirect's counts.
+
+    Shown only when every count present is a plain non-negative number and
+    synced is there.
+    """
+    counts: dict[str, int] = {}
+    for key in _SYNC_KEYS:
+        raw = args.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.isdigit():
+            return None
+        counts[key] = int(raw)
+    if "synced" not in counts:
+        return None
+    synced = counts["synced"]
+    noun = "batch" if synced == 1 else "batches"
+    parts = [f"{synced} {noun} re-reviewed with rules {rules_version}"]
+    labels = {
+        "current": "already current",
+        "newer": "on newer rules (left alone)",
+        "unknown": "with an unknown rule version (left alone)",
+        "failed": "failed",
+    }
+    parts += [
+        f"{counts[key]} {label}" for key, label in labels.items() if counts.get(key)
+    ]
+    kind = "alert" if counts.get("failed") else "ok"
+    return Notice(kind, "; ".join(parts) + ". Earlier runs are kept as they were.")
+
+
+def sync_state(latest: Any, rules_version: str) -> SyncState:
+    """Count stored batches by standing; latest maps batch id to its latest run."""
+    from pharma_batch_record_checker.store.rereview import Standing, standing
+
+    standings = [
+        standing(None if run is None else run.rule_version, rules_version)
+        for run in latest.values()
+    ]
+    return SyncState(
+        rules_version=rules_version,
+        due=sum(s.moves_forward for s in standings),
+        newer=standings.count(Standing.NEWER),
+        unknown=standings.count(Standing.UNKNOWN),
+    )

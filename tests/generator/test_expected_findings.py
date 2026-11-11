@@ -10,10 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from pharma_batch_record_checker.generator.expected_findings import (
+    ALL_RULE_IDS,
     CRITICAL,
     EXPECTED_FINDINGS_HEADER,
     NEEDS_REVIEW,
-    RULE_IDS,
+    V1_RULE_IDS,
+    V2_RULE_IDS,
     DefectLog,
     ExpectedFinding,
     PlantedDefect,
@@ -33,7 +35,7 @@ def test_header_is_exact_four_columns():
 
 def test_rule_ids_are_the_eight_agreed_spellings():
     """The eight confirmed rule_id spellings (rule_version 1.0.0)."""
-    assert set(RULE_IDS) == {
+    assert set(V1_RULE_IDS) == {
         "out_of_range",
         "missing_reading",
         "missing_step",
@@ -43,7 +45,7 @@ def test_rule_ids_are_the_eight_agreed_spellings():
         "verifier_before_performer",
         "unit_mismatch",
     }
-    assert len(RULE_IDS) == 8
+    assert len(V1_RULE_IDS) == 8
 
 
 def test_severity_values():
@@ -421,3 +423,52 @@ def test_allows_same_step_id_in_different_batches_of_different_masters():
         ("B26-0001", NEEDS_REVIEW),
         ("P26-0001", NEEDS_REVIEW),
     ]
+
+
+# --- Version-2 rules (late_verification, performed_out_of_order) -------------
+
+FIRST = MASTER["S-DISP-01"]  # step_seq 1, critical
+
+
+def test_v1_rule_ids_are_unchanged_and_v2_are_separate():
+    """V1_RULE_IDS is the 8 v1 rules; V2_RULE_IDS adds two (RULE_IDS has all 10)."""
+    assert len(V1_RULE_IDS) == 8
+    assert V2_RULE_IDS == ("late_verification", "performed_out_of_order")
+    assert ALL_RULE_IDS == V1_RULE_IDS + V2_RULE_IDS
+    assert not set(V1_RULE_IDS) & set(V2_RULE_IDS)
+
+
+@pytest.mark.parametrize("rule_id", ["late_verification", "performed_out_of_order"])
+@pytest.mark.parametrize("step", [PLAIN, CRIT], ids=["non_critical", "critical"])
+def test_v2_rule_alone_needs_review_even_on_a_critical_step(rule_id, step):
+    """Neither v2 rule is a critical trigger: alone it is Needs Review."""
+    assert rows(expected_findings(plant((step, rule_id)))) == [
+        ("T26-0001", step.step_id, rule_id, NEEDS_REVIEW)
+    ]
+
+
+def test_v2_rules_together_on_one_step_are_critical():
+    """Two findings on one step make it Critical, v2 rules included."""
+    findings = expected_findings(
+        plant((PLAIN, "late_verification"), (PLAIN, "performed_out_of_order"))
+    )
+    assert {f.severity for f in findings} == {CRITICAL}
+
+
+def test_v2_rule_ids_are_valid_expected_findings():
+    """expected_findings.csv accepts the v2 rule_ids."""
+    for rule_id in V2_RULE_IDS:
+        assert finding(rule_id=rule_id).rule_id == rule_id
+
+
+def test_rejects_performed_out_of_order_on_the_first_step():
+    """The batch's first step has no step before it to be earlier than."""
+    with pytest.raises(ValueError, match="first step"):
+        expected_findings(plant((FIRST, "performed_out_of_order")))
+
+
+@pytest.mark.parametrize("other", ["missing_second_check", "verifier_before_performer"])
+def test_rejects_late_verification_with_no_or_early_verification(other):
+    """No verification, or one before performing, can't also be late."""
+    with pytest.raises(ValueError, match="late_verification"):
+        expected_findings(plant((CRIT, "late_verification"), (CRIT, other)))

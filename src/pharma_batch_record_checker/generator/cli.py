@@ -46,7 +46,7 @@ from pharma_batch_record_checker.generator.defects import (
     plant_defects,
 )
 from pharma_batch_record_checker.generator.expected_findings import (
-    RULE_IDS,
+    ALL_RULE_IDS,
     DefectLog,
 )
 from pharma_batch_record_checker.generator.masters import (
@@ -485,14 +485,14 @@ def _findings_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
 
 
 def _rules_line(dataset: Dataset, lines: Sequence[ProductLine]) -> str:
-    """Findings per rule in rule order, and why any rule has none."""
-    counts = {rule: 0 for rule in RULE_IDS}
+    """Findings per rule (v1 then v2 rules), and why any rule has none."""
+    counts = {rule: 0 for rule in ALL_RULE_IDS}
     for finding in dataset.findings:
         counts[finding.rule_id] += 1
     listed = ", ".join(f"{rule} {n}" for rule, n in counts.items() if n)
     missing = [rule for rule, n in counts.items() if not n]
     if not missing:
-        return f"  rules: {listed} (all {len(RULE_IDS)} planted)"
+        return f"  rules: {listed} (all {len(ALL_RULE_IDS)} planted)"
     needed, covered = batches_for_rules(lines)
     notes = [f"not planted: {', '.join(missing)}"]
     if needed is not None and any(rule in covered for rule in missing):

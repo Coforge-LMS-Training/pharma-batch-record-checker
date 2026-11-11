@@ -328,3 +328,37 @@ def test_without_pharma_root_the_repository_is_found_as_before(monkeypatch, tmp_
     monkeypatch.delenv("PHARMA_ROOT", raising=False)
     monkeypatch.chdir(nested)
     assert setup.repo_root() == root
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _upgrades(monkeypatch) -> list[str]:
+    """Record Alembic upgrades instead of touching a database."""
+    from alembic import command
+
+    calls: list[str] = []
+    monkeypatch.setattr(command, "upgrade", lambda cfg, rev: calls.append(rev))
+    return calls
+
+
+def test_migrate_refuses_a_database_from_a_newer_version(monkeypatch):
+    """A revision this code doesn't know stops boot with a plain message."""
+    calls = _upgrades(monkeypatch)
+    monkeypatch.setattr(setup, "database_revision", lambda: "0099_from_the_future")
+    with pytest.raises(SystemExit) as stopped:
+        setup.migrate(REPO_ROOT)
+    message = str(stopped.value)
+    assert "0099_from_the_future" in message
+    assert "only move forward" in message
+    assert "docker compose --profile app down -v" in message
+    assert calls == []
+
+
+def test_migrate_upgrades_a_known_or_fresh_database(monkeypatch):
+    """A known revision, or none at all, is upgraded to head as before."""
+    calls = _upgrades(monkeypatch)
+    for revision in ("0006_review_problem", "0007_v2_rule_ids", None):
+        monkeypatch.setattr(setup, "database_revision", lambda rev=revision: rev)
+        setup.migrate(REPO_ROOT)
+    assert calls == ["head", "head", "head"]

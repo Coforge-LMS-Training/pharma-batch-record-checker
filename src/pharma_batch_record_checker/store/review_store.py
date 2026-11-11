@@ -12,7 +12,11 @@ from pharma_batch_record_checker.handoff import PAYLOAD_FIELDS, FindingPayload
 from pharma_batch_record_checker.review import ResultCategory
 from pharma_batch_record_checker.rules import RULE_IDS
 from pharma_batch_record_checker.store.connection import transaction
-from pharma_batch_record_checker.store.errors import BatchNotFound, InvalidReview
+from pharma_batch_record_checker.store.errors import (
+    BatchNotFound,
+    InvalidReview,
+    StaleReview,
+)
 from pharma_batch_record_checker.store.hashchain import REVIEW_RUN, append_event
 
 _RULE_IDS = frozenset(RULE_IDS)
@@ -36,28 +40,97 @@ class PostgresReviewStore:
         The batch must already exist. An unknown rule, severity, or result
         category raises InvalidReview and leaves no run and no findings.
         """
-        run_id = uuid.uuid4()
-        try:
-            with transaction() as conn:
-                if not _batch_exists(conn, batch_id):
-                    raise BatchNotFound(f"no batch {batch_id}")
-                if result_category not in _CATEGORIES:
-                    raise InvalidReview(f"unknown result_category {result_category!r}")
-                conn.execute(
-                    """
-                    INSERT INTO review_run (
-                        run_id, batch_id, rule_version, result_category
-                    ) VALUES (%s, %s, %s, %s)
-                    """,
-                    (run_id, batch_id, rule_version, result_category),
-                )
-                for seq, finding in enumerate(findings):
-                    _check_finding(finding, batch_id)
-                    _insert_finding(conn, uuid.uuid4(), run_id, seq, finding)
-                append_event(conn, REVIEW_RUN, str(run_id))
-        except psycopg.errors.CheckViolation as exc:
-            raise InvalidReview("review run was rejected") from exc
-        return str(run_id)
+        return _store_run(batch_id, rule_version, result_category, findings)
+
+    def insert_review_run_after(
+        self,
+        batch_id: str,
+        rule_version: str,
+        result_category: ResultCategory,
+        findings: tuple[FindingPayload, ...],
+        *,
+        expected_latest_run_id: str | None,
+    ) -> str:
+        """Store a run only if the batch's latest run is still the expected one.
+
+        expected_latest_run_id is the run the caller reviewed from, or None
+        for a batch with no run. If another run is now the latest, StaleReview
+        is raised and nothing is stored. This is how a re-review stays a
+        single run under double clicks and parallel requests. Otherwise it
+        behaves exactly like insert_review_run.
+        """
+        return _store_run(
+            batch_id,
+            rule_version,
+            result_category,
+            findings,
+            check_latest=True,
+            expected_latest_run_id=expected_latest_run_id,
+        )
+
+
+def _store_run(
+    batch_id: str,
+    rule_version: str,
+    result_category: ResultCategory,
+    findings: tuple[FindingPayload, ...],
+    *,
+    check_latest: bool = False,
+    expected_latest_run_id: str | None = None,
+) -> str:
+    """Insert one run, its findings and its chain event in one transaction.
+
+    Every run insert first takes a transaction-level advisory lock on the
+    batch, so runs for one batch are written one at a time and the latest-run
+    check cannot race. The lock is released at commit or rollback.
+    """
+    run_id = uuid.uuid4()
+    try:
+        with transaction() as conn:
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"review_run:{batch_id}",),
+            )
+            if not _batch_exists(conn, batch_id):
+                raise BatchNotFound(f"no batch {batch_id}")
+            if check_latest:
+                latest = _latest_run_id(conn, batch_id)
+                if latest != expected_latest_run_id:
+                    raise StaleReview(
+                        f"batch {batch_id} has a newer run than "
+                        f"{expected_latest_run_id or 'none'}"
+                    )
+            if result_category not in _CATEGORIES:
+                raise InvalidReview(f"unknown result_category {result_category!r}")
+            conn.execute(
+                """
+                INSERT INTO review_run (
+                    run_id, batch_id, rule_version, result_category
+                ) VALUES (%s, %s, %s, %s)
+                """,
+                (run_id, batch_id, rule_version, result_category),
+            )
+            for seq, finding in enumerate(findings):
+                _check_finding(finding, batch_id)
+                _insert_finding(conn, uuid.uuid4(), run_id, seq, finding)
+            append_event(conn, REVIEW_RUN, str(run_id))
+    except psycopg.errors.CheckViolation as exc:
+        raise InvalidReview("review run was rejected") from exc
+    return str(run_id)
+
+
+def _latest_run_id(conn: psycopg.Connection, batch_id: str) -> str | None:
+    """The batch's latest run id, ordered as the pages order runs."""
+    row = conn.execute(
+        """
+        SELECT run_id FROM review_run
+        WHERE batch_id = %s
+        ORDER BY created_at DESC, run_id DESC
+        LIMIT 1
+        """,
+        (batch_id,),
+    ).fetchone()
+    return None if row is None else str(row[0])
 
 
 def _batch_exists(conn: psycopg.Connection, batch_id: str) -> bool:

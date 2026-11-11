@@ -1,9 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Not found · Batch Record Review{% endblock %}
+{% block title %}{% if refused %}Refused{% else %}Not found{% endif %} · Batch Record Review{% endblock %}
 {% block body %}
 <div class="empty-state card">
   <svg class="icon icon-muted" aria-hidden="true"><use href="#i-search"/></svg>
-  {% if batch_id %}
+  {% if refused %}
+  <p role="alert"><strong>That request came from another site, so nothing was stored.</strong> Use the buttons on this app's own pages.</p>
+  {% elif batch_id %}
   <p role="alert"><strong>No batch {{ batch_id }} is stored.</strong></p>
   {% else %}
   <p role="alert"><strong>That finding is not stored.</strong></p>

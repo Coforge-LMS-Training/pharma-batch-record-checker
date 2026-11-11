@@ -5,7 +5,18 @@
   <div>
     <h1>Batches</h1>
     <p class="lead">Every stored batch and the result of its latest review. Select a batch to see its findings.</p>
+    <p class="muted rules-line">Rules {{ sync.rules_version }}{% if sync.due %} · {{ sync.due }} {{ 'batch was' if sync.due == 1 else 'batches were' }} reviewed with older rules{% endif %}</p>
   </div>
+  {% if sync.due %}
+  <form class="inline-form" method="post" action="{{ url_for('rereview_everything') }}">
+    <input type="hidden" name="back" value="batches">
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+    <button class="btn btn-secondary" type="submit">
+      <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Re-review all ({{ sync.due }})
+    </button>
+  </form>
+  {% endif %}
 </div>
 
 <form class="toolbar" method="get" action="{{ url_for('index') }}" role="search">
@@ -29,6 +40,10 @@
   </a>
   {% endif %}
 </form>
+
+{% if notice %}
+<p class="notice notice-{{ notice.kind }}" role="{{ 'alert' if notice.kind == 'alert' else 'status' }}"><svg class="icon" aria-hidden="true"><use href="#{{ 'i-alert' if notice.kind == 'alert' else ('i-check' if notice.kind == 'ok' else 'i-info') }}"/></svg>{{ notice.text }}</p>
+{% endif %}
 
 {% if day_error %}
 <p class="alert" role="alert"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{{ day_error }}</p>
@@ -82,6 +97,7 @@
         <th>Product</th>
         <th>Master record</th>
         <th>Result</th>
+        <th>Rules</th>
         <th class="num">Steps flagged</th>
         <th class="num">Findings</th>
         <th>Last reviewed</th>
@@ -95,6 +111,21 @@
         <td class="c-full">{{ row.product }}</td>
         <td class="c-meta">{{ row.master }}</td>
         <td class="c-result">{% if row.result %}<span class="{{ result_class(row.result) }}">{{ row.result }}</span>{% else %}<span class="badge badge-none">Not reviewed</span>{% endif %}</td>
+        <td class="c-meta" data-label="Rules">
+          <div class="rules-cell">
+            <span class="rules-tag">{{ row.rules or '–' }}</span>
+            {% if row.can_rereview %}
+            <form class="inline-form" method="post" action="{{ url_for('rereview_one', batch_id=row.batch_id) }}">
+              <input type="hidden" name="back" value="batches">
+              {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+              {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+              <button class="btn btn-secondary btn-xs" type="submit" data-tip="Re-review with rules {{ sync.rules_version }}" aria-label="Re-review {{ row.batch_id }} with rules {{ sync.rules_version }}">
+                <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Re-review
+              </button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
         <td class="num c-meta" data-label="Steps flagged">{{ row.steps if row.steps is not none else '–' }}</td>
         <td class="num c-meta" data-label="Findings">{{ row.findings if row.findings is not none else '–' }}</td>
         <td class="c-meta c-hide-sm">{% if row.reviewed %}{{ format_day(row.reviewed) }}{% else %}–{% endif %}</td>

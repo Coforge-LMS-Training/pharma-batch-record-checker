@@ -5,6 +5,11 @@ search text, or the runs stored on a UTC day. GET /batches/<id> shows that
 batch's runs and the latest run's findings. GET /guide explains the results
 and the checks. POST a note calls insert_finding_note and redirects back. The
 CSV route returns export_batch_csv. There is no login and no release action.
+
+POST /batches/<id>/rereview and POST /rereview-all re-review stored batches
+with the running rules (store/rereview.py). They only append runs, only move
+forward (never over a run from newer rules), refuse cross-origin requests,
+and redirect back with a short result code or counts.
 """
 
 import os
@@ -13,6 +18,7 @@ from dataclasses import replace
 from datetime import date
 from functools import wraps
 from typing import Any
+from urllib.parse import urlsplit
 
 import psycopg
 from flask import (
@@ -30,25 +36,31 @@ from pharma_batch_record_checker.demo.view import (
     GLOSSARY,
     NEEDS_A_LOOK,
     RESULT_GUIDE,
-    RULE_GUIDE,
     ChainStatus,
+    Notice,
     audit_entry,
     format_day,
     format_decimal,
     format_store_time,
     group_findings,
+    guide_checks,
+    newer_rules_text,
     overview,
     page_terms,
     process_strip,
+    rereview_notice,
     result_class,
     status_slug,
     step_results,
+    sync_notice,
+    sync_state,
 )
 from pharma_batch_record_checker.store.connection import connect
 from pharma_batch_record_checker.store.errors import (
     BatchNotFound,
     FindingNotFound,
     MasterNotFound,
+    StoreError,
 )
 from pharma_batch_record_checker.store.hashchain import master_entity_id, verify_chain
 from pharma_batch_record_checker.store.notes import insert_finding_note
@@ -58,11 +70,18 @@ from pharma_batch_record_checker.store.reads import (
     export_batch_csv,
     get_batch,
     get_master,
+    latest_runs,
     list_batches,
     list_findings,
     list_notes,
     list_runs,
     list_runs_on,
+)
+from pharma_batch_record_checker.store.rereview import (
+    rereview_all,
+    rereview_batch,
+    running_version,
+    standing,
 )
 
 # Footer branding. TODO(owner): confirm the team name and set CONTACT_EMAIL
@@ -86,7 +105,7 @@ def create_app() -> Flask:
         result_class=result_class,
         status_slug=status_slug,
         result_guide=RESULT_GUIDE,
-        rule_guide=RULE_GUIDE,
+        rule_guide=guide_checks(),
         glossary=GLOSSARY,
         faq=FAQ,
         page_terms=page_terms,
@@ -121,6 +140,8 @@ def create_app() -> Flask:
             stats=_stats(rows),
             attention=attention,
             total=len(rows),
+            sync=sync_state(latest_runs(), running_version()),
+            notice=sync_notice(request.args, running_version()),
         )
 
     @app.get("/guide")
@@ -148,6 +169,8 @@ def create_app() -> Flask:
             "day_error": day_error,
             "review_days": _review_days(),
             "stats": _stats(all_rows),
+            "sync": sync_state(latest_runs(), running_version()),
+            "notice": _list_notice(all_rows),
         }
         if day is not None:
             runs = list_runs_on(day)
@@ -204,6 +227,52 @@ def create_app() -> Flask:
             ), 400
         return redirect(url_for("batch_page", batch_id=batch_id), code=303)
 
+    @app.post("/batches/<batch_id>/rereview")
+    @stored
+    def rereview_one(batch_id: str) -> str | tuple[str, int] | Response:
+        if _cross_origin():
+            return _refused()
+        try:
+            result = rereview_batch(batch_id)
+        except BatchNotFound:
+            return render_template("missing.html", batch_id=batch_id), 404
+        except StoreError as exc:
+            app.logger.warning("re-review of %s failed: %s", batch_id, exc)
+            code = "failed"
+        else:
+            code = "done" if result.run_id is not None else result.standing.value
+            if code == "not-reviewed":
+                code = "failed"
+        if request.form.get("back") == "batches":
+            return redirect(
+                url_for("index", **_list_filters(), rereview=code, batch=batch_id),
+                code=303,
+            )
+        return redirect(
+            url_for("batch_page", batch_id=batch_id, rereview=code), code=303
+        )
+
+    @app.post("/rereview-all")
+    @stored
+    def rereview_everything() -> tuple[str, int] | Response:
+        if _cross_origin():
+            return _refused()
+        report = rereview_all()
+        for batch_id, reason in report.failed:
+            app.logger.warning("re-review of %s failed: %s", batch_id, reason)
+        return redirect(
+            url_for(
+                "index" if request.form.get("back") == "batches" else "overview_page",
+                **(_list_filters() if request.form.get("back") == "batches" else {}),
+                synced=len(report.rereviewed),
+                current=len(report.current),
+                newer=len(report.newer),
+                unknown=len(report.unknown),
+                failed=len(report.failed),
+            ),
+            code=303,
+        )
+
     @app.get("/batches/<batch_id>/export.csv")
     @stored
     def export_csv(batch_id: str) -> Response | tuple[str, int]:
@@ -247,6 +316,63 @@ def stored(view: Any) -> Any:
     return wrapped
 
 
+# Longest search text carried back to the list after a re-review.
+MAX_QUERY_LENGTH = 200
+
+
+def _list_filters() -> dict[str, str]:
+    """The list's status and search from a re-review form, if they are sane.
+
+    Only a known status and a short search are carried back; anything else
+    is dropped, so the redirect never echoes arbitrary input.
+    """
+    filters: dict[str, str] = {}
+    status = request.form.get("status", "")
+    if status in STATUS_FILTERS:
+        filters["status"] = status
+    query = request.form.get("q", "")
+    if isinstance(query, str) and 0 < len(query.strip()) <= MAX_QUERY_LENGTH:
+        filters["q"] = query.strip()
+    return filters
+
+
+def _list_notice(rows: list[dict[str, Any]]) -> Notice | None:
+    """The status line on the list after a row's re-review or a Re-review all.
+
+    A row's line names its batch, and is shown only for a batch on the list.
+    """
+    rules_version = running_version()
+    batch_id = request.args.get("batch", "")
+    row = next((row for row in rows if row["batch_id"] == batch_id), None)
+    if row is not None:
+        notice = rereview_notice(
+            request.args.get("rereview", ""), rules_version, row["rules"]
+        )
+        if notice is not None:
+            return replace(notice, text=f"{batch_id}: {notice.text}")
+    return sync_notice(request.args, rules_version)
+
+
+def _cross_origin() -> bool:
+    """True when a POST names another site in Origin, or else in Referer.
+
+    The re-review forms post from this app's own pages, so a request from
+    anywhere else is refused before anything is stored. A request with
+    neither header (a script, the test client) is let through.
+    """
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if not source:
+        return False
+    if source == "null":
+        return True
+    return urlsplit(source).netloc != request.host
+
+
+def _refused() -> tuple[str, int]:
+    """The 403 page for a cross-origin POST."""
+    return render_template("missing.html", batch_id=None, refused=True), 403
+
+
 def _parse_day(raw_day: str) -> tuple[date | None, str | None]:
     if raw_day == "":
         return None, None
@@ -260,11 +386,15 @@ def _batch_rows(batches: tuple[BatchSummary, ...]) -> list[dict[str, Any]]:
     """One display row per batch: ids, product, latest result, and counts."""
     products = _product_names(batches)
     counts = _latest_counts()
+    latest = latest_runs()
+    rules_version = running_version()
     rows = []
     for batch in batches:
         product = products[(batch.master_record_id, batch.master_version)]
         steps, findings = counts.get(batch.batch_id, (None, None))
         master = f"{batch.master_record_id} v{batch.master_version}"
+        run = latest.get(batch.batch_id)
+        rules = None if run is None else run.rule_version
         rows.append(
             {
                 "batch_id": batch.batch_id,
@@ -275,6 +405,8 @@ def _batch_rows(batches: tuple[BatchSummary, ...]) -> list[dict[str, Any]]:
                 "reviewed": batch.created_at,
                 "steps": steps,
                 "findings": findings,
+                "rules": rules,
+                "can_rereview": standing(rules, rules_version).moves_forward,
                 "search": f"{batch.batch_id} {master} {product}".lower(),
             }
         )
@@ -463,6 +595,9 @@ def _render_batch(
         master = None
     runs = list_runs(batch_id)
     latest = runs[-1] if runs else None
+    rules_version = running_version()
+    latest_version = None if latest is None else latest.rule_version
+    review_state = standing(latest_version, rules_version)
     groups: tuple[Any, ...] = ()
     if latest is not None:
         findings = list_findings(latest.run_id)
@@ -490,6 +625,12 @@ def _render_batch(
         trail=_audit_trail(batch_id, batch.master_record_id, batch.master_version),
         chain=_chain_status(force=request.args.get("verify") == "1"),
         batch_size="" if master is None else format_decimal(master.batch_size),
+        rules_version=rules_version,
+        review_state=review_state,
+        newer_note=newer_rules_text(latest_version or "?", rules_version),
+        notice=rereview_notice(
+            request.args.get("rereview", ""), rules_version, latest_version
+        ),
         note_error=note_error,
         note_finding_id=note_finding_id,
         draft_name=draft_name,

@@ -20,8 +20,8 @@ EXPECTED_FINDINGS_HEADER: tuple[str, ...] = (
     "severity",
 )
 
-# The eight confirmed rule_id spellings (rule_version 1.0.0).
-RuleId = Literal[
+# The eight v1 rule_id spellings (rule_version 1.0.0).
+RuleIdV1 = Literal[
     "out_of_range",
     "missing_reading",
     "missing_step",
@@ -31,7 +31,19 @@ RuleId = Literal[
     "verifier_before_performer",
     "unit_mismatch",
 ]
-RULE_IDS: tuple[str, ...] = get_args(RuleId)
+V1_RULE_IDS: tuple[str, ...] = get_args(RuleIdV1)
+
+# The two version-2 rules (rule_version 1.1.0): rule 9, verified more than 60
+# minutes after performed; rule 10, performed before the previous step present
+# in the batch. Both are Needs Review alone.
+RuleIdV2 = Literal["late_verification", "performed_out_of_order"]
+V2_RULE_IDS: tuple[str, ...] = get_args(RuleIdV2)
+
+# All ten rules (rule_version 1.1.0). RULE_IDS is the list the app's rules
+# engine implements; a test keeps the two equal.
+RuleId = Literal[RuleIdV1, RuleIdV2]
+RULE_IDS: tuple[str, ...] = V1_RULE_IDS + V2_RULE_IDS
+ALL_RULE_IDS: tuple[str, ...] = RULE_IDS  # alias, kept for cli.py
 
 # The two agreed severity values. Severity is per step: every finding on a
 # step carries that step's severity.
@@ -66,8 +78,9 @@ class PlantedDefect:
     the master key, the critical flag and what the step measures are never
     copied by hand. A defect that could never fire on its step (unknown rule,
     a critical-only rule on a non-critical step, missing_reading on a step
-    with no reading, out_of_range on a step with no limits) is refused here,
-    at the planting call.
+    with no reading, out_of_range on a step with no limits,
+    performed_out_of_order on the first step) is refused here, at the
+    planting call.
     """
 
     batch_id: str
@@ -78,6 +91,7 @@ class PlantedDefect:
     measured: bool
     has_limits: bool
     rule_id: RuleId
+    first_step: bool = False
 
     @classmethod
     def on(cls, batch_id: str, step: MasterRow, rule_id: str) -> "PlantedDefect":
@@ -91,12 +105,13 @@ class PlantedDefect:
             measured=step.parameter is not None,
             has_limits=step.min_value is not None or step.max_value is not None,
             rule_id=rule_id,
+            first_step=step.step_seq == 1,
         )
 
     def __post_init__(self) -> None:
         """Refuse a defect whose rule can never fire on this step."""
         problem = None
-        if self.rule_id not in RULE_IDS:
+        if self.rule_id not in ALL_RULE_IDS:
             problem = "unknown rule_id"
         elif self.rule_id in CRITICAL_ONLY_RULES and not self.critical:
             problem = "applies to critical steps only"
@@ -104,6 +119,8 @@ class PlantedDefect:
             problem = "a sign-off-only step has no reading to be missing"
         elif self.rule_id == "out_of_range" and not self.has_limits:
             problem = "the step has no limits to be outside of"
+        elif self.rule_id == "performed_out_of_order" and self.first_step:
+            problem = "the first step has no step before it to be earlier than"
         if problem:
             raise ValueError(
                 f"batch {self.batch_id} step {self.step_id} {self.rule_id}: {problem}"
@@ -183,6 +200,14 @@ def _check_step(batch_id: str, step_id: str, defects: list[PlantedDefect]) -> No
         problems.append(
             "missing_second_check leaves no verifier for same_person or "
             "verifier_before_performer"
+        )
+    if "late_verification" in rule_set and rule_set & {
+        "missing_second_check",
+        "verifier_before_performer",
+    }:
+        problems.append(
+            "late_verification needs a verification after performing, so it "
+            "can't fire with missing_second_check or verifier_before_performer"
         )
     if problems:
         raise ValueError(

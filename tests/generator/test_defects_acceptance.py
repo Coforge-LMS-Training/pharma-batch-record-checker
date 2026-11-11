@@ -18,7 +18,7 @@ from pharma_batch_record_checker.generator.defects import (
 from pharma_batch_record_checker.generator.expected_findings import (
     CRITICAL,
     NEEDS_REVIEW,
-    RULE_IDS,
+    V1_RULE_IDS,
 )
 from pharma_batch_record_checker.generator.masters import PLC250, SYN500
 from tests.generator.rule_oracle import rule_violations
@@ -56,7 +56,7 @@ def oracle_pairs(dataset, batch_id, rows):
 
 def test_all_eight_rule_ids_planted():
     """Every agreed rule has at least one planted case."""
-    assert {f.rule_id for f in DATASET.findings} == set(RULE_IDS)
+    assert {f.rule_id for f in DATASET.findings} == set(V1_RULE_IDS)
 
 
 def test_two_defect_steps_present_and_critical():

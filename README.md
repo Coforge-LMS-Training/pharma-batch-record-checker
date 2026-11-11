@@ -52,6 +52,26 @@ Then open http://127.0.0.1:8000.
 | `port is already allocated` | The host demo (`uv run pharma-review-demo`) or something else is on 8000. Stop it, or set `APP_PORT=8080`. |
 | Plain `docker compose up` starts only Postgres | That's intended. The app needs `--profile app`, and the generator runs with `docker compose run`. |
 
+### Roll forward to new rules (same database)
+
+A batch is reviewed when it is first loaded. After you deploy a version with newer rules (a higher `rule_version`), the stored batches still show their old runs until you re-review them. **Re-reviewing only adds runs:** the earlier runs, their findings, the notes and the audit chain stay as they were, and each new run is stamped with the new rule version.
+
+```bash
+git checkout <the newer version>
+docker compose --profile app up --build -d --wait     # same database: migrations run forward, the load says "Nothing new loaded"
+```
+
+Then, in the app:
+- **Overview → "Re-review all (N)"** re-reviews every batch whose latest run used older rules, and says how many moved.
+- **A batch page → "Re-review with rules X"** does it for one batch. The header shows which rules the latest run used.
+
+Each batch's review history then shows both runs, oldest first, and its status follows the latest run. A second click adds nothing.
+
+**There is no rollback.** Reviews and migrations only move forward:
+- An older version running on a database that newer rules have reviewed shows a note on those batches and never adds a run over them.
+- If a newer version also added a migration, an older version stops at boot with a message naming the migration.
+- To go back, reset the database (`docker compose --profile app down -v`) and boot the older version. This loses the stored history, so do it only for the local demo.
+
 Architecture, volumes, environment and security notes: [`docs/containers.md`](docs/containers.md).
 
 ## Store and review demo
@@ -103,3 +123,7 @@ The same options always give byte-identical files. `data/` is gitignored, so reg
 **Full usage** covers every flag, how batches and defects are planned, how many batches you need, the output files, the summary and exit codes. It's in [`src/pharma_batch_record_checker/generator/README.md`](src/pharma_batch_record_checker/generator/README.md). For catalog products, see [`catalog/README.md`](catalog/README.md).
 
 `pharma-review-demo --data data/` loads that folder instead of the approved sample, then serves the pages. It stops with a hint if the folder has no `master_record.csv` or `batch_record.csv`. A generated dataset uses the same masters as the approved sample, so if the database already holds the sample (or an earlier dataset), nothing new is loaded and the command says so. Run `docker compose down -v` first to view only the generated data. Plain `uv run pharma-review-demo` still loads the approved sample.
+
+## Rule changes
+
+- 2026-11-10: rule_version 1.1.0 adds late_verification and performed_out_of_order (agreed with the team and Kelley)

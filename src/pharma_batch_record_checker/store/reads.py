@@ -307,6 +307,33 @@ def list_runs(batch_id: str) -> tuple[StoredRun, ...]:
     return tuple(_run(row) for row in rows)
 
 
+def latest_runs() -> dict[str, StoredRun | None]:
+    """Every stored batch and its latest run (None when it has no run).
+
+    Latest is chosen as in list_batches: the greatest created_at, then the
+    greater run_id. Keys are in batch_id order.
+    """
+    with _query() as conn:
+        rows = conn.execute(
+            """
+            SELECT batch.batch_id AS stored_batch_id, latest.*
+            FROM batch
+            LEFT JOIN LATERAL (
+                SELECT run_id, batch_id, rule_version, result_category, created_at
+                FROM review_run
+                WHERE review_run.batch_id = batch.batch_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            ) AS latest ON TRUE
+            ORDER BY batch.batch_id COLLATE "C"
+            """
+        ).fetchall()
+    return {
+        row["stored_batch_id"]: None if row["run_id"] is None else _run(row)
+        for row in rows
+    }
+
+
 def list_runs_on(day: date) -> tuple[StoredRun, ...]:
     """Runs whose created_at falls on this calendar day in UTC.
 

@@ -36,6 +36,13 @@ from pharma_batch_record_checker.schema import BatchRow, MasterRow
 # verifier_before_performer: the verification is timed this long before
 # the step was performed.
 VERIFY_TOO_EARLY = timedelta(minutes=15)
+# late_verification (v2 rule 9): verified more than LATE_VERIFICATION_MINUTES
+# after performing. Planted at 65 minutes, the spec's example.
+LATE_VERIFICATION_MINUTES = 60
+VERIFY_LATE = timedelta(minutes=65)
+# performed_out_of_order (v2 rule 10): performed this long before the previous
+# step present in the batch (the spec's 08:00 / 07:40 example).
+OUT_OF_ORDER_GAP = timedelta(minutes=20)
 
 # Instruction-like comments, as an operator might write them. They are plain
 # data: placed only on defective steps, they never change a value, so they
@@ -102,6 +109,7 @@ def plant_defects(
     rows: dict[str, BatchRow | None] = {row.step_id: row for row in clean_batch}
     staged = DefectLog()
     planted: list[tuple[MasterRow, str]] = []
+    out_of_order: list[MasterRow] = []  # planted last, against the final rows
     for defect in defects:
         step = steps.get(defect.step_id)
         if step is None:
@@ -114,15 +122,50 @@ def plant_defects(
         staged.record(batch_id, step, defect.rule_id)  # applicability first
         if defect.rule_id == "missing_step":
             rows[defect.step_id] = None
+        elif defect.rule_id == "performed_out_of_order":
+            out_of_order.append(step)
         else:
             rows[defect.step_id] = _rebuild(row, _changes(defect, step, row))
         planted.append((step, defect.rule_id))
+    for step in sorted(out_of_order, key=lambda s: s.step_seq):
+        _plant_out_of_order(master, rows, step)
     _add_comments(rows, {d.step_id for d in defects}, comments or {})
     staged.findings()  # refuses combinations that couldn't all fire
     for step, rule_id in planted:
         log.record(batch_id, step, rule_id)
     ordered = sorted(master, key=lambda step: step.step_seq)
     return [row for step in ordered if (row := rows.get(step.step_id)) is not None]
+
+
+def _plant_out_of_order(
+    master: Sequence[MasterRow], rows: dict[str, BatchRow | None], step: MasterRow
+) -> None:
+    """Move step's row to OUT_OF_ORDER_GAP before the previous step present.
+
+    "Previous" is the nearest earlier master step (by step_seq) whose row is
+    still in the batch, as rule 10 defines it. The verification moves by the
+    same amount, so the verify delay is unchanged and no late or early
+    verification finding appears as a side effect.
+    """
+    row = rows.get(step.step_id)
+    if row is None:
+        raise ValueError(f"{step.step_id}: no row left to plant on (missing_step)")
+    earlier = [
+        r
+        for s in sorted(master, key=lambda s: s.step_seq)
+        if s.step_seq < step.step_seq and (r := rows.get(s.step_id)) is not None
+    ]
+    if not earlier:
+        raise ValueError(f"{step.step_id}: no earlier step in the batch to be before")
+    previous = earlier[-1]
+    if row.performed_at is None or previous.performed_at is None:
+        raise ValueError(f"{step.step_id}: performed_out_of_order needs both times")
+    moved = previous.performed_at - OUT_OF_ORDER_GAP
+    shift = moved - row.performed_at
+    changes: dict[str, Any] = {"performed_at": moved}
+    if row.verified_at is not None:
+        changes["verified_at"] = row.verified_at + shift
+    rows[step.step_id] = _rebuild(row, changes)
 
 
 def _check_clean_batch(
@@ -192,6 +235,11 @@ def _changes(defect: Defect, step: MasterRow, row: BatchRow) -> dict[str, Any]:
         return changes
     if rule == "unit_mismatch":
         return {"unit": _mismatched_unit(defect, step)}
+    if rule == "late_verification":
+        late: dict[str, Any] = {"verified_at": row.performed_at + VERIFY_LATE}
+        if row.verified_by is None:  # non-critical steps carry no verifier yet
+            late["verified_by"] = VERIFIERS[0]
+        return late
     raise ValueError(f"{defect.step_id}: unknown rule_id {rule!r}")
 
 

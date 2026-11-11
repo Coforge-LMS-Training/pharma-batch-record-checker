@@ -122,7 +122,7 @@ def test_clean_batch_is_no_findings(tmp_path):
     assert result.batches["B26-0413"].findings == ()
     assert result.batches["B26-0413"].result_category == "No Findings"
     assert (result.result_category, result.complete) == ("No Findings", True)
-    assert result.rule_version == "1.0.0"
+    assert result.rule_version == "1.1.0"
 
 
 def test_critical_batch_is_not_hidden_by_a_blocked_one(tmp_path):
@@ -147,11 +147,11 @@ def test_blocked_batch_is_never_no_findings(tmp_path):
 # --- Contract with the generator -----------------------------------------------------
 
 
-def test_no_rule_id_beyond_the_eight_and_severity_names_match(tmp_path):
-    """Only the 8 agreed rule IDs ever appear; severity names are the generator's."""
+def test_no_rule_id_beyond_the_ten_and_severity_names_match(tmp_path):
+    """Only the 10 agreed rule IDs ever appear; severity names are the generator's."""
     data = build_dataset(0)
     result = run(tmp_path, data.batches)
-    assert len(set(RULE_IDS)) == 8
+    assert len(set(RULE_IDS)) == 10
     assert {f.rule_id for b in result.batches.values() for f in b.findings} <= set(
         RULE_IDS
     )

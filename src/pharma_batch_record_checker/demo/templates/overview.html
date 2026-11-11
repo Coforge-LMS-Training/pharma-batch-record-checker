@@ -5,11 +5,28 @@
   <div>
     <h1>Overview</h1>
     <p class="lead">Each batch record is checked step by step against its approved master record. Here is what needs a person's attention.</p>
+    <p class="muted rules-line">Rules {{ sync.rules_version }}{% if sync.due %} · {{ sync.due }} {{ 'batch was' if sync.due == 1 else 'batches were' }} reviewed with older rules{% else %} · every batch is reviewed with these rules or newer{% endif %}</p>
   </div>
-  <a class="btn btn-primary" href="{{ url_for('index') }}">
-    <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>All batches
-  </a>
+  <div class="actions">
+    {% if sync.due %}
+    <form class="inline-form" method="post" action="{{ url_for('rereview_everything') }}">
+      <button class="btn btn-secondary" type="submit">
+        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Re-review all ({{ sync.due }})
+      </button>
+    </form>
+    {% endif %}
+    <a class="btn btn-primary" href="{{ url_for('index') }}">
+      <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>All batches
+    </a>
+  </div>
 </div>
+
+{% if notice %}
+<p class="notice notice-{{ notice.kind }}" role="{{ 'alert' if notice.kind == 'alert' else 'status' }}"><svg class="icon" aria-hidden="true"><use href="#{{ 'i-alert' if notice.kind == 'alert' else 'i-check' }}"/></svg>{{ notice.text }}</p>
+{% endif %}
+{% if sync.newer or sync.unknown %}
+<p class="notice notice-info" role="status"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>{% if sync.newer %}{{ sync.newer }} {{ 'batch was' if sync.newer == 1 else 'batches were' }} reviewed with newer rules than this app ({{ sync.rules_version }}). {% endif %}{% if sync.unknown %}{{ sync.unknown }} {{ 'batch has' if sync.unknown == 1 else 'batches have' }} a rule version that can't be compared. {% endif %}Reviews only move forward, so this app leaves them as they are.</p>
+{% endif %}
 
 <section class="stat-grid" aria-label="Batches by result">
   <a class="stat" href="{{ url_for('index') }}">
