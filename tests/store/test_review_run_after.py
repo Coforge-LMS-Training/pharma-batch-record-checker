@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from pharma_batch_record_checker import rules
 from pharma_batch_record_checker.handoff import build_payload
 from pharma_batch_record_checker.store.errors import BatchNotFound, StaleReview
 from pharma_batch_record_checker.store.hashchain import verify_chain
@@ -30,6 +31,11 @@ MASTER_CSV = FIXTURES / "master_record.csv"
 BATCH_CSV = FIXTURES / "batch_record.csv"
 BATCH = "B26-0413"
 
+# Versions relative to the engine's, so these tests hold for any RULE_VERSION.
+LOADED = rules.RULE_VERSION
+NEWER = f"{LOADED}.1"
+OLDER = "0"
+
 
 @pytest.fixture
 def loaded(admin):
@@ -37,7 +43,7 @@ def loaded(admin):
     return load_and_review(MASTER_CSV, BATCH_CSV, PostgresReviewStore())
 
 
-def _append(run, expected: str | None, rule_version: str = "1.0.1") -> str:
+def _append(run, expected: str | None, rule_version: str = NEWER) -> str:
     """Append B26-0413's findings again as a run after expected."""
     batch = run.batches[BATCH]
     return PostgresReviewStore().insert_review_run_after(
@@ -64,7 +70,7 @@ def test_append_after_the_latest_run_adds_one_run(loaded):
     run_id = _append(loaded, first.run_id)
     runs = list_runs(BATCH)
     assert [run.run_id for run in runs] == [first.run_id, run_id]
-    assert runs[-1].rule_version == "1.0.1"
+    assert runs[-1].rule_version == NEWER
     assert latest_runs()[BATCH] == runs[-1]
     assert verify_chain() is None
 
@@ -74,8 +80,8 @@ def test_append_after_a_stale_run_writes_nothing(loaded):
     (first,) = list_runs(BATCH)
     _append(loaded, first.run_id)
     with pytest.raises(StaleReview):
-        _append(loaded, first.run_id, "1.0.2")
-    assert [run.rule_version for run in list_runs(BATCH)] == ["1.0.0", "1.0.1"]
+        _append(loaded, first.run_id, f"{NEWER}.1")
+    assert [run.rule_version for run in list_runs(BATCH)] == [LOADED, NEWER]
 
 
 def test_expecting_no_run_fails_when_one_exists(loaded):

@@ -1,6 +1,6 @@
 """Re-reviewing stored batches with the running rules (forward only).
 
-The approved sample is loaded once (rule_version 1.0.0), then re-reviewed as
+The approved sample is loaded once (with the engine's RULE_VERSION), then re-reviewed as
 if newer or older rules were running, by passing current=. Synthetic rows only.
 """
 
@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from pharma_batch_record_checker import rules
 from pharma_batch_record_checker.records import BatchStep
 from pharma_batch_record_checker.schema import BatchRow
 from pharma_batch_record_checker.store.hashchain import verify_chain
@@ -33,10 +34,15 @@ pytestmark = [
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "approved_sample"
 SAMPLE_BATCHES = ("B26-0412", "B26-0413", "P26-0201", "P26-0202")
 
+# Versions relative to the engine's, so these tests hold for any RULE_VERSION.
+LOADED = rules.RULE_VERSION
+NEWER = f"{LOADED}.1"
+OLDER = "0"
+
 
 @pytest.fixture
 def loaded(admin):
-    """The approved sample, stored and reviewed once with rule_version 1.0.0."""
+    """The approved sample, stored and reviewed once with the engine's rule version."""
     load_and_review(
         FIXTURES / "master_record.csv",
         FIXTURES / "batch_record.csv",
@@ -71,12 +77,12 @@ def test_newer_rules_append_one_run_with_the_same_findings(loaded):
     the stored rows rebuild exactly what the CSVs gave.
     """
     (first,) = list_runs("B26-0413")
-    result = rereview_batch("B26-0413", current="1.0.1")
+    result = rereview_batch("B26-0413", current=NEWER)
     assert result.standing is Standing.OLDER
     assert result.run_id is not None
     assert result.result_category == first.result_category == "Critical"
     runs = list_runs("B26-0413")
-    assert [run.rule_version for run in runs] == ["1.0.0", "1.0.1"]
+    assert [run.rule_version for run in runs] == [LOADED, NEWER]
     assert runs[-1].run_id == result.run_id
     assert _payloads(result.run_id) == _payloads(first.run_id)
     assert verify_chain() is None
@@ -84,8 +90,8 @@ def test_newer_rules_append_one_run_with_the_same_findings(loaded):
 
 def test_rereview_twice_is_a_no_op(loaded):
     """The second call finds the batch CURRENT and stores nothing."""
-    rereview_batch("B26-0413", current="1.0.1")
-    again = rereview_batch("B26-0413", current="1.0.1")
+    rereview_batch("B26-0413", current=NEWER)
+    again = rereview_batch("B26-0413", current=NEWER)
     assert again.standing is Standing.CURRENT
     assert again.run_id is None
     assert len(list_runs("B26-0413")) == 2
@@ -93,7 +99,7 @@ def test_rereview_twice_is_a_no_op(loaded):
 
 def test_older_rules_never_review_over_newer_ones(loaded):
     """Running rules older than the latest run: refused, nothing written."""
-    result = rereview_batch("B26-0413", current="0.9.0")
+    result = rereview_batch("B26-0413", current=OLDER)
     assert result.standing is Standing.NEWER
     assert result.run_id is None
     assert len(list_runs("B26-0413")) == 1
@@ -135,10 +141,10 @@ def test_batch_without_a_run_is_reviewed(loaded):
 
 def test_rereview_all_moves_every_batch_forward_once(loaded):
     """All four batches get one new run; a second sync finds them current."""
-    report = rereview_all(current="1.0.1")
+    report = rereview_all(current=NEWER)
     assert report.rereviewed == SAMPLE_BATCHES
     assert all(len(list_runs(batch_id)) == 2 for batch_id in SAMPLE_BATCHES)
-    again = rereview_all(current="1.0.1")
+    again = rereview_all(current=NEWER)
     assert again.current == SAMPLE_BATCHES
     assert again.rereviewed == ()
     assert verify_chain() is None
@@ -146,6 +152,6 @@ def test_rereview_all_moves_every_batch_forward_once(loaded):
 
 def test_rereview_all_with_older_rules_reports_newer(loaded):
     """Older running rules leave every batch alone and say so."""
-    report = rereview_all(current="0.9.0")
+    report = rereview_all(current=OLDER)
     assert report.newer == SAMPLE_BATCHES
     assert report.rereviewed == ()

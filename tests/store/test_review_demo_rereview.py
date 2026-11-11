@@ -1,18 +1,18 @@
 """Re-review from the pages: one batch, or every batch, forward only.
 
-The approved sample is loaded with rule_version 1.0.0. Newer or older running
+The approved sample is loaded with the engine's RULE_VERSION. Newer or older running
 rules are simulated by patching rules.RULE_VERSION, which the re-review reads
 at call time. Synthetic rows only; skipped when DATABASE_URL is unset.
 """
 
 import os
-import re
 from pathlib import Path
 
 import pytest
 
 from pharma_batch_record_checker import rules
 from pharma_batch_record_checker.demo.app import create_app
+from pharma_batch_record_checker.demo.view import RULE_GUIDE
 from pharma_batch_record_checker.store.hashchain import verify_chain
 from pharma_batch_record_checker.store.load import load_and_review
 from pharma_batch_record_checker.store.reads import list_runs
@@ -29,10 +29,15 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "approved_sample"
 BATCH = "B26-0413"
 SAMPLE_BATCHES = ("B26-0412", "B26-0413", "P26-0201", "P26-0202")
 
+# Versions relative to the engine's, so these tests hold for any RULE_VERSION.
+LOADED = rules.RULE_VERSION
+NEWER = f"{LOADED}.1"
+OLDER = "0"
+
 
 @pytest.fixture
 def client(admin):
-    """The approved sample stored with rule_version 1.0.0, and a test client."""
+    """The approved sample stored and reviewed once, and a test client."""
     load_and_review(
         FIXTURES / "master_record.csv",
         FIXTURES / "batch_record.csv",
@@ -43,14 +48,14 @@ def client(admin):
 
 @pytest.fixture
 def newer_rules(monkeypatch):
-    """Run as if the engine were at rule_version 1.0.1."""
-    monkeypatch.setattr(rules, "RULE_VERSION", "1.0.1")
+    """Run as if the engine had rules newer than the stored runs."""
+    monkeypatch.setattr(rules, "RULE_VERSION", NEWER)
 
 
 @pytest.fixture
 def older_rules(monkeypatch):
-    """Run as if older code were serving a database reviewed with 1.0.0."""
-    monkeypatch.setattr(rules, "RULE_VERSION", "0.9.0")
+    """Run as if older code were serving this database."""
+    monkeypatch.setattr(rules, "RULE_VERSION", OLDER)
 
 
 def _main(client, path: str) -> str:
@@ -70,17 +75,17 @@ def test_same_rules_offer_no_button_and_show_the_version(client):
     """After load every batch is current: no button, and the rules are shown."""
     html = _main(client, f"/batches/{BATCH}")
     assert not _rereview_form(html)
-    assert re.search(r"<dt>Rules</dt><dd>1\.0\.0", html)
+    assert f"<dt>Rules</dt><dd>{LOADED}" in html
     overview = _main(client, "/")
     assert 'action="/rereview-all"' not in overview
-    assert "Rules 1.0.0" in overview
+    assert f"Rules {LOADED}" in overview
 
 
 def test_newer_rules_offer_the_button(client, newer_rules):
     """A batch reviewed with older rules can be re-reviewed."""
     html = _main(client, f"/batches/{BATCH}")
     assert _rereview_form(html)
-    assert "Re-review with rules 1.0.1" in html
+    assert f"Re-review with rules {NEWER}" in html
 
 
 def test_rereview_appends_a_run_and_redirects(client, newer_rules):
@@ -88,9 +93,9 @@ def test_rereview_appends_a_run_and_redirects(client, newer_rules):
     response = client.post(f"/batches/{BATCH}/rereview")
     assert response.status_code == 303
     assert response.headers["Location"].endswith(f"/batches/{BATCH}?rereview=done")
-    assert [run.rule_version for run in list_runs(BATCH)] == ["1.0.0", "1.0.1"]
+    assert [run.rule_version for run in list_runs(BATCH)] == [LOADED, NEWER]
     html = _main(client, f"/batches/{BATCH}?rereview=done")
-    assert "Re-reviewed with rules 1.0.1" in html
+    assert f"Re-reviewed with rules {NEWER}" in html
     assert html.count("Reviewed: Critical") == 2
     assert not _rereview_form(html)
     assert verify_chain() is None
@@ -108,7 +113,7 @@ def test_older_code_never_reviews_over_newer_rules(client, older_rules):
     """Older running rules: a note instead of a button, and POST stores nothing."""
     html = _main(client, f"/batches/{BATCH}")
     assert not _rereview_form(html)
-    assert "newer rules (1.0.0) than this app (0.9.0)" in html
+    assert f"newer rules ({LOADED}) than this app ({OLDER})" in html
     response = client.post(f"/batches/{BATCH}/rereview")
     assert response.headers["Location"].endswith("?rereview=newer")
     assert len(list_runs(BATCH)) == 1
@@ -160,7 +165,7 @@ def test_rereview_all_moves_every_batch_forward(client, newer_rules):
     assert "synced=4" in location and "failed=0" in location
     assert all(len(list_runs(batch_id)) == 2 for batch_id in SAMPLE_BATCHES)
     after = _main(client, "/?" + location.split("?", 1)[1])
-    assert "4 batches re-reviewed with rules 1.0.1" in after
+    assert f"4 batches re-reviewed with rules {NEWER}" in after
     assert 'action="/rereview-all"' not in after
 
 
@@ -180,9 +185,9 @@ def test_pages_still_offer_no_release_action(client, newer_rules):
 
 
 def test_guide_lists_only_the_engine_checks(client):
-    """The Guide shows the eight checks main runs, not the stored v2 titles."""
+    """The Guide shows the checks this engine runs, not every stored rule id."""
     guide = _main(client, "/guide")
-    assert "Checked long after it was done" not in guide
-    assert "Done before the step before it" not in guide
     checks = guide.split('class="check-grid"', 1)[1].split("</ul>", 1)[0]
-    assert checks.count("<li>") == len(rules.RULE_IDS) == 8
+    assert checks.count("<li>") == len(rules.RULE_IDS)
+    for rule_id, entry in RULE_GUIDE.items():
+        assert (entry.title in checks) == (rule_id in rules.RULE_IDS), rule_id
