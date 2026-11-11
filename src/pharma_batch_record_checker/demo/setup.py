@@ -129,14 +129,47 @@ def compose_up(root: Path) -> None:
 
 
 def migrate(root: Path) -> None:
-    """Apply Alembic migrations with DATABASE_ADMIN_URL."""
+    """Apply Alembic migrations with DATABASE_ADMIN_URL.
+
+    Migrations only move forward. If the database is at a revision this code
+    doesn't have (a newer version of the app migrated it), stop with a plain
+    message instead of Alembic's traceback: this version can't roll it back.
+    """
     from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from alembic.util.exc import CommandError
 
     from alembic import command
 
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
+    revision = database_revision()
+    if revision is not None:
+        try:
+            known = ScriptDirectory.from_config(cfg).get_revision(revision)
+        except CommandError:
+            known = None
+        if known is None:
+            raise SystemExit(
+                f"The database is at migration {revision}, which this version of "
+                "the app doesn't have: a newer version migrated it. Migrations "
+                "and reviews only move forward, so this version can't use it. "
+                "Run the newer version, or reset the local database with: "
+                "docker compose --profile app down -v"
+            )
     command.upgrade(cfg, "head")
+
+
+def database_revision() -> str | None:
+    """The Alembic revision stored in the database, or None if it has none."""
+    with psycopg.connect(os.environ["DATABASE_ADMIN_URL"]) as conn:
+        exists = conn.execute(
+            "SELECT to_regclass('public.alembic_version') IS NOT NULL"
+        ).fetchone()
+        if not exists or not exists[0]:
+            return None
+        row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+    return None if row is None else str(row[0])
 
 
 def load_sample(root: Path) -> bool:
