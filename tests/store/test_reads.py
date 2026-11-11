@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from pharma_batch_record_checker.csv_io import write_batch_csv, write_master_csv
+from pharma_batch_record_checker.rules import RULE_VERSION
 from pharma_batch_record_checker.schema import BatchRow, MasterRow
 from pharma_batch_record_checker.store.errors import (
     BatchNotFound,
@@ -476,7 +477,7 @@ def test_export_of_b26_0413_includes_the_findings_and_a_note(admin, monkeypatch)
     ]
     assert {row["batch_id"] for row in rows} == {"B26-0413"}
     assert {row["result_category"] for row in rows} == {"Critical"}
-    assert {row["rule_version"] for row in rows} == {"1.0.0"}
+    assert {row["rule_version"] for row in rows} == {RULE_VERSION}
 
     exported = next(
         row
@@ -520,7 +521,7 @@ def test_export_includes_one_row_when_a_run_has_no_findings(admin, monkeypatch):
     row = rows[0]
     assert row["batch_id"] == "B26-0412"
     assert row["run_id"] == run.run_id
-    assert row["rule_version"] == "1.0.0"
+    assert row["rule_version"] == RULE_VERSION
     assert row["result_category"] == "No Findings"
     assert row["reviewed_at"].endswith("Z")
     for column in _EMPTY_FINDING:

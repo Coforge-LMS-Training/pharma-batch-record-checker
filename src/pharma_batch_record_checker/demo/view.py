@@ -43,7 +43,7 @@ class RuleGuide:
     fields: frozenset[str]
 
 
-# One entry per rule id in rule_version 1.0.0. The field names are
+# One entry per rule id in rule_version 1.1.0. The field names are
 # FindingView attributes; they mark the values a reader should look at first.
 RULE_GUIDE: dict[str, RuleGuide] = {
     "out_of_range": RuleGuide(
@@ -90,6 +90,18 @@ RULE_GUIDE: dict[str, RuleGuide] = {
         "The recorded unit is not exactly the master's unit. Units are never "
         "converted, so the range is not checked.",
         frozenset({"recorded_unit", "expected_unit"}),
+    ),
+    "late_verification": RuleGuide(
+        "Checked long after it was done",
+        "The verification was recorded more than 60 minutes after the step was "
+        "performed. Exactly 60 minutes is fine.",
+        frozenset({"performed_at", "verified_at"}),
+    ),
+    "performed_out_of_order": RuleGuide(
+        "Done before the step before it",
+        "The step was performed earlier than the previous step in the master "
+        "record that the batch has. The same time is fine.",
+        frozenset({"performed_at"}),
     ),
 }
 
@@ -232,7 +244,7 @@ GLOSSARY: tuple[Term, ...] = (
     Term(
         "rule-version",
         "Rule version",
-        "Which version of the eight checks produced a run, currently 1.0.0, so "
+        "Which version of the ten checks produced a run, currently 1.1.0, so "
         "an old result can always be explained.",
     ),
     Term(
@@ -267,7 +279,7 @@ FAQ: tuple[tuple[str, str], ...] = (
     (
         "What does this site do?",
         (
-            "It compares each batch record with its master record using eight "
+            "It compares each batch record with its master record using ten "
             "checks, and lists every place a person should look. It does not "
             "decide anything on its own."
         ),
