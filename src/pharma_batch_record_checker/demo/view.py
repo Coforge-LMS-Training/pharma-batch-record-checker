@@ -256,7 +256,9 @@ GLOSSARY: tuple[Term, ...] = (
         "run",
         "Review run",
         "One automated check of a batch. Each run is stored separately and "
-        "never overwritten, so the history shows every review.",
+        "never overwritten, so the history shows every review. After a rules "
+        "upgrade, a re-review adds a new run with the new rule version; it "
+        "never goes back to older rules.",
     ),
     Term(
         "rule-version",
@@ -962,3 +964,117 @@ def audit_entry(row: dict[str, Any]) -> AuditEntry:
 
 def _count(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+@dataclass(frozen=True)
+class Notice:
+    """One status line on a page. kind is "ok", "info" or "alert"."""
+
+    kind: str
+    text: str
+
+
+@dataclass(frozen=True)
+class SyncState:
+    """How the stored batches stand against the running rules (Overview)."""
+
+    rules_version: str
+    due: int
+    newer: int
+    unknown: int
+
+
+def rereview_notice(
+    code: str, rules_version: str, latest_version: str | None
+) -> Notice | None:
+    """The line shown after a batch's re-review redirect, from its ?rereview= code.
+
+    Only the codes the route sends are known; anything else shows nothing.
+    """
+    if code == "done":
+        return Notice(
+            "ok",
+            f"Re-reviewed with rules {rules_version}. The new run is the latest "
+            "review; earlier runs and their findings are kept as they were.",
+        )
+    if code == "current":
+        return Notice(
+            "info",
+            f"Already reviewed with the current rules ({rules_version}). "
+            "Nothing was added.",
+        )
+    if code == "newer":
+        return Notice("info", newer_rules_text(latest_version or "?", rules_version))
+    if code == "unknown":
+        return Notice(
+            "info",
+            "This batch's rule version can't be compared with this app's "
+            f"({rules_version}), so nothing was added.",
+        )
+    if code == "failed":
+        return Notice(
+            "alert",
+            "The re-review could not be completed. Nothing was added. "
+            "The app log names the reason.",
+        )
+    return None
+
+
+def newer_rules_text(latest_version: str, rules_version: str) -> str:
+    """Why an older app leaves a batch alone."""
+    return (
+        f"This batch's latest review used newer rules ({latest_version}) than "
+        f"this app ({rules_version}). Reviews only move forward, so this app "
+        "won't add one."
+    )
+
+
+_SYNC_KEYS = ("synced", "current", "newer", "unknown", "failed")
+
+
+def sync_notice(args: Any, rules_version: str) -> Notice | None:
+    """The summary after "Re-review all", read from the redirect's counts.
+
+    Shown only when every count present is a plain non-negative number and
+    synced is there.
+    """
+    counts: dict[str, int] = {}
+    for key in _SYNC_KEYS:
+        raw = args.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.isdigit():
+            return None
+        counts[key] = int(raw)
+    if "synced" not in counts:
+        return None
+    synced = counts["synced"]
+    noun = "batch" if synced == 1 else "batches"
+    parts = [f"{synced} {noun} re-reviewed with rules {rules_version}"]
+    labels = {
+        "current": "already current",
+        "newer": "on newer rules (left alone)",
+        "unknown": "with an unknown rule version (left alone)",
+        "failed": "failed",
+    }
+    parts += [
+        f"{counts[key]} {label}" for key, label in labels.items() if counts.get(key)
+    ]
+    kind = "alert" if counts.get("failed") else "ok"
+    return Notice(kind, "; ".join(parts) + ". Earlier runs are kept as they were.")
+
+
+def sync_state(latest: Any, rules_version: str) -> SyncState:
+    """Count stored batches by standing; latest maps batch id to its latest run."""
+    from pharma_batch_record_checker.store.rereview import Standing, standing
+
+    standings = [
+        standing(None if run is None else run.rule_version, rules_version)
+        for run in latest.values()
+    ]
+    return SyncState(
+        rules_version=rules_version,
+        due=sum(s.moves_forward for s in standings),
+        newer=standings.count(Standing.NEWER),
+        unknown=standings.count(Standing.UNKNOWN),
+    )

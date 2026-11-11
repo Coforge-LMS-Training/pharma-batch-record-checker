@@ -5,6 +5,11 @@ search text, or the runs stored on a UTC day. GET /batches/<id> shows that
 batch's runs and the latest run's findings. GET /guide explains the results
 and the checks. POST a note calls insert_finding_note and redirects back. The
 CSV route returns export_batch_csv. There is no login and no release action.
+
+POST /batches/<id>/rereview and POST /rereview-all re-review stored batches
+with the running rules (store/rereview.py). They only append runs, only move
+forward (never over a run from newer rules), refuse cross-origin requests,
+and redirect back with a short result code or counts.
 """
 
 import os
@@ -13,6 +18,7 @@ from dataclasses import replace
 from datetime import date
 from functools import wraps
 from typing import Any
+from urllib.parse import urlsplit
 
 import psycopg
 from flask import (
@@ -37,18 +43,23 @@ from pharma_batch_record_checker.demo.view import (
     format_store_time,
     group_findings,
     guide_checks,
+    newer_rules_text,
     overview,
     page_terms,
     process_strip,
+    rereview_notice,
     result_class,
     status_slug,
     step_results,
+    sync_notice,
+    sync_state,
 )
 from pharma_batch_record_checker.store.connection import connect
 from pharma_batch_record_checker.store.errors import (
     BatchNotFound,
     FindingNotFound,
     MasterNotFound,
+    StoreError,
 )
 from pharma_batch_record_checker.store.hashchain import master_entity_id, verify_chain
 from pharma_batch_record_checker.store.notes import insert_finding_note
@@ -58,11 +69,18 @@ from pharma_batch_record_checker.store.reads import (
     export_batch_csv,
     get_batch,
     get_master,
+    latest_runs,
     list_batches,
     list_findings,
     list_notes,
     list_runs,
     list_runs_on,
+)
+from pharma_batch_record_checker.store.rereview import (
+    rereview_all,
+    rereview_batch,
+    running_version,
+    standing,
 )
 
 # Footer branding. TODO(owner): confirm the team name and set CONTACT_EMAIL
@@ -121,6 +139,8 @@ def create_app() -> Flask:
             stats=_stats(rows),
             attention=attention,
             total=len(rows),
+            sync=sync_state(latest_runs(), running_version()),
+            notice=sync_notice(request.args, running_version()),
         )
 
     @app.get("/guide")
@@ -204,6 +224,46 @@ def create_app() -> Flask:
             ), 400
         return redirect(url_for("batch_page", batch_id=batch_id), code=303)
 
+    @app.post("/batches/<batch_id>/rereview")
+    @stored
+    def rereview_one(batch_id: str) -> str | tuple[str, int] | Response:
+        if _cross_origin():
+            return _refused()
+        try:
+            result = rereview_batch(batch_id)
+        except BatchNotFound:
+            return render_template("missing.html", batch_id=batch_id), 404
+        except StoreError as exc:
+            app.logger.warning("re-review of %s failed: %s", batch_id, exc)
+            code = "failed"
+        else:
+            code = "done" if result.run_id is not None else result.standing.value
+            if code == "not-reviewed":
+                code = "failed"
+        return redirect(
+            url_for("batch_page", batch_id=batch_id, rereview=code), code=303
+        )
+
+    @app.post("/rereview-all")
+    @stored
+    def rereview_everything() -> tuple[str, int] | Response:
+        if _cross_origin():
+            return _refused()
+        report = rereview_all()
+        for batch_id, reason in report.failed:
+            app.logger.warning("re-review of %s failed: %s", batch_id, reason)
+        return redirect(
+            url_for(
+                "overview_page",
+                synced=len(report.rereviewed),
+                current=len(report.current),
+                newer=len(report.newer),
+                unknown=len(report.unknown),
+                failed=len(report.failed),
+            ),
+            code=303,
+        )
+
     @app.get("/batches/<batch_id>/export.csv")
     @stored
     def export_csv(batch_id: str) -> Response | tuple[str, int]:
@@ -245,6 +305,26 @@ def stored(view: Any) -> Any:
             return render_template("unavailable.html", missing_url=True), 503
 
     return wrapped
+
+
+def _cross_origin() -> bool:
+    """True when a POST names another site in Origin, or else in Referer.
+
+    The re-review forms post from this app's own pages, so a request from
+    anywhere else is refused before anything is stored. A request with
+    neither header (a script, the test client) is let through.
+    """
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if not source:
+        return False
+    if source == "null":
+        return True
+    return urlsplit(source).netloc != request.host
+
+
+def _refused() -> tuple[str, int]:
+    """The 403 page for a cross-origin POST."""
+    return render_template("missing.html", batch_id=None, refused=True), 403
 
 
 def _parse_day(raw_day: str) -> tuple[date | None, str | None]:
@@ -463,6 +543,9 @@ def _render_batch(
         master = None
     runs = list_runs(batch_id)
     latest = runs[-1] if runs else None
+    rules_version = running_version()
+    latest_version = None if latest is None else latest.rule_version
+    review_state = standing(latest_version, rules_version)
     groups: tuple[Any, ...] = ()
     if latest is not None:
         findings = list_findings(latest.run_id)
@@ -490,6 +573,12 @@ def _render_batch(
         trail=_audit_trail(batch_id, batch.master_record_id, batch.master_version),
         chain=_chain_status(force=request.args.get("verify") == "1"),
         batch_size="" if master is None else format_decimal(master.batch_size),
+        rules_version=rules_version,
+        review_state=review_state,
+        newer_note=newer_rules_text(latest_version or "?", rules_version),
+        notice=rereview_notice(
+            request.args.get("rereview", ""), rules_version, latest_version
+        ),
         note_error=note_error,
         note_finding_id=note_finding_id,
         draft_name=draft_name,

@@ -26,9 +26,17 @@
       <div><dt>Master record</dt><dd>{{ batch.master_record_id }} v{{ batch.master_version }} (not stored)</dd></div>
       {% endif %}
       {% if latest %}<div><dt>Last reviewed</dt><dd>{{ format_store_time(latest.created_at) }}</dd></div>{% endif %}
+      {% if latest %}<div><dt>Rules</dt><dd>{{ latest.rule_version }}{% if review_state == 'current' %} <span class="muted">(current)</span>{% endif %}</dd></div>{% endif %}
     </dl>
   </div>
-  <div class="actions" aria-label="Export">
+  <div class="actions" aria-label="Actions">
+    {% if review_state.moves_forward %}
+    <form class="inline-form" method="post" action="{{ url_for('rereview_one', batch_id=batch.batch_id) }}">
+      <button class="btn btn-secondary btn-sm" type="submit">
+        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Re-review with rules {{ rules_version }}
+      </button>
+    </form>
+    {% endif %}
     <a class="icon-btn" href="{{ url_for('export_csv', batch_id=batch.batch_id) }}" download data-tip="Download batch report" aria-label="Download review history as CSV">
       <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
     </a>
@@ -37,6 +45,12 @@
     </a>
   </div>
 </section>
+
+{% if notice %}
+<p class="notice notice-{{ notice.kind }}" role="{{ 'alert' if notice.kind == 'alert' else 'status' }}"><svg class="icon" aria-hidden="true"><use href="#{{ 'i-alert' if notice.kind == 'alert' else ('i-check' if notice.kind == 'ok' else 'i-info') }}"/></svg>{{ notice.text }}</p>
+{% elif review_state == 'newer' %}
+<p class="notice notice-info" role="status"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>{{ newer_note }}</p>
+{% endif %}
 
 {% if latest %}
 <section class="stat-grid stat-grid-sm" aria-label="This review in numbers">
