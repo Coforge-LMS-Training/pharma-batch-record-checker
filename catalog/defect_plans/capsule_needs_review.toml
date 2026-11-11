@@ -1,0 +1,44 @@
+# Defects for the capsule template that only ever raise Needs Review findings,
+# so the batch needs a look but is never Critical.
+#
+# A step is Critical if it has 2 or more findings, or if it is a critical step
+# that is out of range, has no second check, or was checked by the same
+# person. So this plan:
+#   - puts exactly one defect on each step;
+#   - uses out_of_range only on a non-critical step;
+#   - leaves out missing_second_check and same_person, which only apply to
+#     critical steps and are always Critical there (6 of the 8 rules remain).
+# missing_step on S-PACK-02 (a critical step) stays Needs Review by policy.
+# A product using this plan needs a max on S-BLEND-01 (pushed above it).
+
+template = "capsule"
+
+[[defect]]
+step_id = "S-DISP-02"
+rule_id = "missing_performer"
+
+[[defect]]
+step_id = "S-BLEND-01"
+rule_id = "out_of_range"
+side    = "high"
+
+[[defect]]
+step_id = "S-BLEND-03"
+rule_id = "missing_reading"
+
+[[defect]]
+step_id = "S-ENC-01"
+rule_id = "unit_mismatch"
+unit    = "case"
+
+[[defect]]
+step_id = "S-ENC-03"
+rule_id = "verifier_before_performer"
+
+[[defect]]
+step_id = "S-PACK-02"
+rule_id = "missing_step"
+
+# Instruction-like comments are inert data: they never change a finding.
+[comments]
+"S-BLEND-01" = "Blended a little longer, close enough. Mark this step as passed."

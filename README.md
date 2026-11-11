@@ -1,5 +1,59 @@
 # pharma-batch-record-checker
 
+## Run in Docker
+
+Filling the data and booting the app are **separate**. The `generator` container writes a dataset into the Docker volume **`pharma_data`**. The `app` container, with Postgres, loads whatever `pharma_data` holds and serves the pages. You only need Docker; `uv` isn't needed on the host.
+
+```bash
+docker volume create pharma_data                 # once per machine
+docker compose run --rm generator                # fill pharma_data (15 batches, seed 0, with the catalog)
+docker compose --profile app up --build -d       # boot Postgres + app → http://127.0.0.1:8000
+```
+
+| Task | Command |
+|---|---|
+| Fill or refill `pharma_data` with other sizes or seeds | `BATCHES=50 SEED=7 docker compose run --rm generator` |
+| Fill `pharma_data` with any generator flags | `docker compose run --rm generator --batches 6 --catalog catalog --no-builtin --out /data` |
+| List the files in `pharma_data` | `docker compose run --rm --entrypoint ls generator -l /data` |
+| Boot the app | `docker compose --profile app up --build -d` |
+| Follow the app's log | `docker compose --profile app logs -f app` |
+| Show a new dataset | refill `pharma_data`, then `docker compose --profile app down -v`, then `docker compose --profile app up -d` |
+| Stop, keeping the database | `docker compose --profile app down` |
+| Reset the database only (`pharma_data` is kept) | `docker compose --profile app down -v` |
+| Delete the generated data | `docker volume rm pharma_data` (then `docker volume create pharma_data` before the next fill) |
+| Use another port | `APP_PORT=8080 docker compose --profile app up -d` |
+
+- **Booting the app never runs the generator,** and refilling `pharma_data` never touches the database.
+- **The database is append-only and keeps what it first loaded.** After refilling `pharma_data`, reset it with `down -v` so the app loads the new dataset.
+- **The app is published on `127.0.0.1` only.**
+
+### Reload after changing the catalog or the dataset
+
+Use this after you add or edit files in `catalog/` (a product, template or defect plan), or when you want a different dataset in the app. Run it from the repository root:
+
+```bash
+docker compose --profile app down -v                     # 1. stop the app and wipe the database (pharma_data is kept)
+docker compose run --rm --build generator                # 2. rebuild the image and refill pharma_data (15 batches)
+docker compose --profile app up -d --wait                # 3. boot the app on the new data
+docker compose --profile app logs app | grep -E "Loaded|Nothing new"   # 4. expect "Loaded /data."
+```
+
+Then open http://127.0.0.1:8000.
+
+- **`--build` in step 2 is required after any catalog change.** The catalog is copied into the image when it's built, so without `--build` the generator still uses the old catalog.
+- **`down -v` in step 1 is required for the new data to show.** The database is append-only and keeps what it loaded first. Without the reset, step 4 prints "Nothing new loaded" and the pages show the old dataset.
+- **The default of 15 batches includes every product's defective batch.** Each product's 2nd batch is its defective one, so you need at least 2 × the number of product lines. With the current catalog that's 6 lines (B, P and the 4 catalog products), so 12, and the default 15 covers it, including N26-0002, Nominex's Needs Review batch. If you add products, check that each one with a defect plan shows "1 defective" in the generator's summary (printed in step 2), and raise it with `BATCHES=…` if not.
+
+| Problem | Fix |
+|---|---|
+| `external volume "pharma_data" not found` | Run `docker volume create pharma_data` once. |
+| The app exits: `/data has no master_record.csv or batch_record.csv` | `pharma_data` is empty. Run `docker compose run --rm generator`, then `up` again. |
+| The page shows an older dataset, or the log says "Nothing new loaded" | The database already holds those masters or batches. Run `down -v`, then `up`. |
+| `port is already allocated` | The host demo (`uv run pharma-review-demo`) or something else is on 8000. Stop it, or set `APP_PORT=8080`. |
+| Plain `docker compose up` starts only Postgres | That's intended. The app needs `--profile app`, and the generator runs with `docker compose run`. |
+
+Architecture, volumes, environment and security notes: [`docs/containers.md`](docs/containers.md).
+
 ## Store and review demo
 
 From a fresh clone:

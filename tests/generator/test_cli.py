@@ -316,8 +316,8 @@ def test_summary_shows_the_time_span_and_files(tmp_path, capsys):
 def test_summary_lists_catalog_products_too(tmp_path, capsys):
     """Catalog products get their own lines, after B and P."""
     lines = summary_of(tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG))
-    letters = [line.split()[0] for line in lines[2:7]]
-    assert letters == ["B", "P", "L", "F", "M"]
+    letters = [line.split()[0] for line in lines[2:8]]
+    assert letters == ["B", "P", "L", "F", "M", "N"]
 
 
 def test_out_is_required(capsys):
@@ -655,6 +655,7 @@ def test_catalog_adds_its_products_after_the_built_ins(tmp_path):
         "MBR-EXL005",
         "MBR-FTP040",
         "MBR-MKZ075",
+        "MBR-NMX010",
     ]
     assert batch_ids_in(tmp_path) == [
         "B26-0001",
@@ -662,12 +663,12 @@ def test_catalog_adds_its_products_after_the_built_ins(tmp_path):
         "L26-0001",
         "F26-0001",
         "M26-0001",
+        "N26-0001",
         "B26-0002",
         "P26-0002",
         "L26-0002",
         "F26-0002",
         "M26-0002",
-        "B26-0003",
     ]
     assert flagged_batches_in(tmp_path) == {
         "B26-0002",
@@ -744,18 +745,23 @@ def test_no_builtin_generates_only_catalog_products(tmp_path, capsys):
     lines = summary_of(
         tmp_path, capsys, "--batches", "6", "--catalog", str(CATALOG), "--no-builtin"
     )
-    assert master_ids_in(tmp_path) == ["MBR-EXL005", "MBR-FTP040", "MBR-MKZ075"]
+    assert master_ids_in(tmp_path) == [
+        "MBR-EXL005",
+        "MBR-FTP040",
+        "MBR-MKZ075",
+        "MBR-NMX010",
+    ]
     assert batch_ids_in(tmp_path) == [
         "L26-0001",
         "F26-0001",
         "M26-0001",
+        "N26-0001",
         "L26-0002",
         "F26-0002",
-        "M26-0002",
     ]
     assert flagged_batches_in(tmp_path) == {"L26-0002", "F26-0002"}
-    assert [line.split()[0] for line in lines[2:5]] == ["L", "F", "M"]
-    assert lines[5].startswith("  findings:")
+    assert [line.split()[0] for line in lines[2:6]] == ["L", "F", "M", "N"]
+    assert lines[6].startswith("  findings:")
 
 
 def test_no_builtin_output_matches_the_rule_check(tmp_path):
@@ -884,11 +890,11 @@ def test_batches_for_rules_with_the_built_in_lines():
 
 
 def test_batches_for_rules_with_the_catalog_lines():
-    """With B, P and three catalog lines, batch 6 is B26-0002: all 8 rules."""
+    """With B, P and four catalog lines, batch 7 is B26-0002: all 8 rules."""
     lines = PRODUCT_LINES + extra_lines(load_catalog(CATALOG).products)
-    assert batches_for_rules(lines) == (6, frozenset(RULE_IDS))
-    assert planted_rules(lines, 6) == set(RULE_IDS)
-    assert planted_rules(lines, 5) == set()
+    assert batches_for_rules(lines) == (7, frozenset(RULE_IDS))
+    assert planted_rules(lines, 7) == set(RULE_IDS)
+    assert planted_rules(lines, 6) == set()
 
 
 def test_batches_for_rules_without_any_plan():
@@ -950,12 +956,12 @@ def test_summary_hint_counts_from_the_first_line_with_a_plan(tmp_path, capsys):
     )
     assert (
         "  findings: none (a line's defects start at its 2nd batch; "
-        "use --batches 5 or more)"
+        "use --batches 6 or more)"
     ) in lines
 
 
 def test_summary_names_the_batches_that_plant_every_rule(tmp_path, capsys):
-    """A capsule-plan line first: batch 4 lacks missing_reading, batch 5 adds it."""
+    """A capsule-plan line first: batch 5 lacks missing_reading, batch 6 adds it."""
     catalog = catalog_copy(
         tmp_path,
         rename={"mockazole_75mg.toml": "aa_mockazole_75mg.toml"},
@@ -967,10 +973,40 @@ def test_summary_names_the_batches_that_plant_every_rule(tmp_path, capsys):
         },
     )
     args = ("--catalog", str(catalog), "--no-builtin")
-    four = summary_of(tmp_path / "four", capsys, "--batches", "4", *args)
-    rules = next(line for line in four if line.startswith("  rules:"))
-    assert rules.endswith(
-        "(not planted: missing_reading; --batches 5 plants every rule your plans cover)"
-    )
     five = summary_of(tmp_path / "five", capsys, "--batches", "5", *args)
-    assert any(line.endswith("(all 8 planted)") for line in five)
+    rules = next(line for line in five if line.startswith("  rules:"))
+    assert rules.endswith(
+        "(not planted: missing_reading; --batches 6 plants every rule your plans cover)"
+    )
+    six = summary_of(tmp_path / "six", capsys, "--batches", "6", *args)
+    assert any(line.endswith("(all 8 planted)") for line in six)
+
+
+# --- A plan that only raises Needs Review findings ----------------------------
+
+
+def test_needs_review_plan_never_makes_a_batch_critical(tmp_path):
+    """Nominex's capsule_needs_review plan: 6 findings on 6 steps, none Critical.
+
+    Its defective batch (N26-0002) needs a look but isn't Critical, and the
+    test-only rule check finds exactly the planted findings.
+    """
+    run(tmp_path, "--batches", "8", "--catalog", str(CATALOG), "--no-builtin")
+    rows = [r for r in expected_rows(tmp_path) if r["batch_id"] == "N26-0002"]
+    assert len(rows) == 6
+    assert len({r["step_id"] for r in rows}) == 6
+    assert {r["severity"] for r in rows} == {"Needs Review"}
+    with (tmp_path / MASTER_FILE).open(newline="", encoding="utf-8") as f:
+        master = [
+            MasterRow(**r)
+            for r in csv.DictReader(f)
+            if r["master_record_id"] == "MBR-NMX010"
+        ]
+    with (tmp_path / BATCH_FILE).open(newline="", encoding="utf-8") as f:
+        batch = [
+            BatchRow(**r) for r in csv.DictReader(f) if r["batch_id"] == "N26-0002"
+        ]
+    found = sorted(
+        tuple(reversed(f.split(":"))) for f in rule_violations(master, batch)
+    )
+    assert found == sorted((r["step_id"], r["rule_id"]) for r in rows)

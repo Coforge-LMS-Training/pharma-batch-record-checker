@@ -1,3 +1,12 @@
+# Local stack. See docs/containers.md for the architecture.
+#
+#   docker volume create pharma_data                  # once
+#   docker compose run --rm generator                  # fill pharma_data
+#   docker compose --profile app up --build -d         # boot postgres + app
+#
+# Filling the data and booting the app are separate. Plain `docker compose up`
+# (what `uv run pharma-review-demo` runs on the host) starts only postgres.
+
 services:
   postgres:
     image: postgres:16
@@ -15,5 +24,61 @@ services:
     volumes:
       - pharma_postgres:/var/lib/postgresql/data
 
+  # Run on its own: writes master_record.csv, batch_record.csv and
+  # expected_findings.csv into the pharma_data volume, then exits. Never
+  # started by `--profile app up`.
+  generator:
+    profiles: ["tools"]
+    build: .
+    image: pharma-review:local
+    working_dir: /app
+    entrypoint: ["generate-batch-records"]
+    command:
+      - "--batches"
+      - "${BATCHES:-15}"
+      - "--seed"
+      - "${SEED:-0}"
+      - "--catalog"
+      - "catalog"
+      - "--out"
+      - "/data"
+    volumes:
+      - pharma_data:/data
+
+  # Migrates, loads what pharma_data holds (read-only) into postgres, and
+  # serves the pages. Stops with a hint if pharma_data has no dataset yet.
+  app:
+    profiles: ["app"]
+    build: .
+    image: pharma-review:local
+    entrypoint: ["pharma-review-demo", "--host", "0.0.0.0"]
+    command: ["--data", "/data"]
+    environment:
+      DATABASE_URL: postgresql://pharma_app:pharma_app@postgres:5432/pharma
+      DATABASE_ADMIN_URL: postgresql://pharma_admin:pharma_admin@postgres:5432/pharma
+      PHARMA_ROOT: /app
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    volumes:
+      - pharma_data:/data:ro
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pharma_postgres:
+  # Created once with `docker volume create pharma_data`. External, so
+  # `down -v` resets only the database and keeps the generated data.
+  pharma_data:
+    name: pharma_data
+    external: true
