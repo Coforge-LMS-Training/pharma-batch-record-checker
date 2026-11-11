@@ -69,6 +69,7 @@ It doesn't need Postgres and doesn't start it. Passing flags replaces the defaul
 
 - **`pharma_data` is external.** You create it once with `docker volume create pharma_data`. Compose never creates or deletes it, so `down -v` resets the database and keeps your generated data.
 - **The database is append-only.** If it already holds a master or batch from `/data`, the load stores nothing new, says so, and the app serves what's stored. To show a refilled `pharma_data`, reset the database with `down -v` and boot again.
+- **Re-review rolls forward on the same database.** After booting a version with newer rules, "Re-review all" on the Overview (or the button on a batch page) appends a run per batch with the new `rule_version`. Nothing is rewritten, and there is no rollback: an older version never adds a run over newer rules, and it stops at boot if the database has a migration it doesn't know. See the README's "Roll forward to new rules".
 - **The host's `./data` folder isn't used by the containers.** It belongs to the host (`uv`) workflow.
 
 ## Configuration
