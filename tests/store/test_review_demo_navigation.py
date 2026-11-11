@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from pharma_batch_record_checker.demo.app import create_app
-from pharma_batch_record_checker.rules import RULE_IDS
+from pharma_batch_record_checker.rules import RULE_IDS, RULE_VERSION
 from pharma_batch_record_checker.store.load import load_and_review
 from pharma_batch_record_checker.store.reads import list_findings, list_runs
 from pharma_batch_record_checker.store.review_store import PostgresReviewStore
@@ -227,7 +227,7 @@ def test_audit_trail_lists_this_batchs_events_in_order(client):
     html = _audit(_html(client, "/batches/B26-0413"))
     assert "MBR-SYN500 v3" in html
     assert "15 executed steps recorded by operators." in html
-    assert "Rule version 1.0.0 found 10 findings." in html
+    assert f"Rule version {RULE_VERSION} found 10 findings." in html
     # Another batch's events stay off this page.
     assert "P26-0202" not in html
 
